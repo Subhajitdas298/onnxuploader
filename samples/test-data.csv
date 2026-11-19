@@ -1,0 +1,4 @@
+amount_cents,is_international,country_code
+1250,false,US
+89900,true,NG
+45000,true,GB
