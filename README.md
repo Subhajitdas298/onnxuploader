@@ -75,8 +75,27 @@ export STORAGE_CONFIGURE_CORS=true      # lets the browser upload to Azurite fro
 cd frontend && npm ci && npm run dev
 ```
 
-Tests: `cd backend && ./gradlew test` and `cd frontend && npm test`.
 (On Java 25 ONNX Runtime asks for `--enable-native-access=ALL-UNNAMED`; without it you only see a warning.)
+
+## Tests
+
+| Suite | Run it | What it covers |
+|---|---|---|
+| Backend, 57 tests | `cd backend && ./gradlew test` | ONNX header reader, analyzer, inference, exact Shapley values, value validation (int32 range, huge numbers, text length), 10-feature model with 51,200 runs, concurrent runs while the model is replaced, HTTP errors and CORS, SAS link permissions and expiry. Set `AZURITE_CONNECTION_STRING` to also run the real blob tests (upload through the SAS link, overwrite, tampered links). |
+| Frontend unit, 14 tests | `cd frontend && npm test` | CSV parsing and validation, automatic mapping, mapping state. |
+| Browser, 63 tests | `scripts/e2e.sh` | The real UI against the real API and a blob emulator (Azurite): uploads, rejected files, drag and drop and keyboard/tap placement, unsupported models, grid validation, CSV import, scores checked against a reference formula, contributions, failures of the service or of storage, accessibility scan (axe, light and dark theme) and phone layout. |
+| Browser, built UI on another origin | `E2E_MODE=prod scripts/e2e.sh` | The same tests against the production build served from a different origin than the API, so CORS for the API and for direct uploads to blob storage is exercised like in Azure. |
+
+`scripts/e2e.sh` starts Azurite, the API and the UI itself (Java 25 and Node 22 needed; set `PW_CHROMIUM_PATH` to use an
+existing Chromium, otherwise run `npx playwright install chromium` once in `frontend/`). Pass Playwright arguments
+after it, for example `scripts/e2e.sh e2e/mapping.spec.ts -g "moves"`.
+`E2E_SCREENSHOTS=1 scripts/e2e.sh e2e/screenshots.spec.ts` regenerates `docs/screenshots`.
+
+The fixtures for unusual models (float inputs, vector inputs, int32, dynamic shapes, two outputs, ten features) are in
+`backend/src/test/resources/fixtures`, with the script that generates them.
+
+GitHub Actions runs everything: `ci.yml` on branches and pull requests, and the Deploy workflow runs the browser tests
+before it touches Azure.
 
 ## Deploy to Azure
 
@@ -96,7 +115,7 @@ The first request after the API has been idle takes a few seconds while a replic
 
 ```bash
 az login
-infra/bootstrap.sh <github-owner>/<repo> eastus
+infra/bootstrap.sh <github-owner>/<repo>            # region defaults to Central India (centralindia)
 ```
 
 This creates the resource group `rg-fraudrunner-demo`, an Entra app registration that GitHub Actions signs in as

@@ -1,4 +1,4 @@
-import { BlockBlobClient } from '@azure/storage-blob';
+import { AnonymousCredential, BlockBlobClient, newPipeline } from '@azure/storage-blob';
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { api, errorMessage } from '../../api/api';
 import { goTo } from '../../app/wizardSlice';
@@ -31,15 +31,23 @@ export const uploadModel = createAsyncThunk<void, File, { rejectValue: string }>
     if (file.size > MAX_MODEL_BYTES) return rejectWithValue(`“${file.name}” is larger than 25 MB.`);
 
     dispatch(started({ name: file.name, size: file.size }));
+    let link;
     try {
-      const link = await dispatch(api.endpoints.createUploadLink.initiate()).unwrap();
-      dispatch(uploading());
-      await new BlockBlobClient(link.url).uploadData(file, {
+      link = await dispatch(api.endpoints.createUploadLink.initiate()).unwrap();
+    } catch (e) {
+      return rejectWithValue(errorMessage(e));
+    }
+    dispatch(uploading());
+    try {
+      // Retry briefly, so a lost connection is reported in seconds instead of minutes.
+      const pipeline = newPipeline(new AnonymousCredential(), { retryOptions: { maxTries: 3, retryDelayInMs: 500, maxRetryDelayInMs: 2000 } });
+      await new BlockBlobClient(link.url, pipeline).uploadData(file, {
         blobHTTPHeaders: { blobContentType: 'application/octet-stream' },
         onProgress: (e) => dispatch(progressed(Math.min(100, Math.round((e.loadedBytes / file.size) * 100)))),
       });
     } catch (e) {
-      return rejectWithValue(errorMessage(e));
+      const reason = e instanceof Error && e.message ? ` (${e.message.split('\n')[0]})` : '';
+      return rejectWithValue(`The file could not be sent to storage. Check your connection and try again.${reason}`);
     }
     dispatch(api.util.invalidateTags(['Model']));
     dispatch(finished());

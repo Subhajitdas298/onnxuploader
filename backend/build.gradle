@@ -44,3 +44,7 @@ tasks.named('processTestResources') {
         include '*.onnx'
     }
 }
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-Xlint:deprecation']
+}

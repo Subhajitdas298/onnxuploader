@@ -28,7 +28,7 @@ import StepHeader from '../../components/StepHeader';
 import TypeChip from '../../components/TypeChip';
 import { monoFont } from '../../theme';
 import type { CellValue, FeatureKind, TestRunRequest } from '../../types';
-import { INTEGER, parseTestCsv } from './csv';
+import { isWholeNumber, parseTestCsv } from './csv';
 import { addRow, csvFailed, csvLoaded, deleteRow, setCell, triedRun, type TestRow } from './testsSlice';
 
 interface Column {
@@ -42,7 +42,7 @@ interface Column {
 function cellInvalid(kind: FeatureKind, value: CellValue | undefined): boolean {
   if (kind === 'BOOLEAN') return false;
   const v = typeof value === 'string' ? value.trim() : '';
-  return kind === 'INTEGER' ? !INTEGER.test(v) : v === '';
+  return kind === 'INTEGER' ? !isWholeNumber(v) : v === '';
 }
 
 export default function TestDataStep() {

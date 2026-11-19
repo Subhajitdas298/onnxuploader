@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup, run by a person who can create resource groups and app registrations:
 #   az login
-#   infra/bootstrap.sh <github-owner>/<repo> [location] [resource-group]
+#   infra/bootstrap.sh <github-owner>/<repo> [location] [resource-group]   (default region: centralindia)
 #
 # It creates the resource group, an Entra app registration that GitHub Actions signs in as through OIDC
 # (no secret is stored anywhere), gives it rights on that one resource group, and stores the three values the
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 REPO="${1:?usage: bootstrap.sh <github-owner>/<repo> [location] [resource-group]}"
-LOCATION="${2:-eastus}"
+LOCATION="${2:-centralindia}"
 RG="${3:-rg-fraudrunner-demo}"
 APP_NAME="gh-${REPO//\//-}-deploy"
 

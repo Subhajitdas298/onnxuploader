@@ -1,11 +1,13 @@
 package com.example.fraudrunner.onnx;
 
+import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtException;
 import com.example.fraudrunner.api.ApiException;
 import com.example.fraudrunner.config.AppProperties;
 import com.example.fraudrunner.feature.Feature;
 import com.example.fraudrunner.feature.FeatureCatalog;
-import com.example.fraudrunner.feature.FeatureKind;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -18,6 +20,12 @@ import org.springframework.stereotype.Service;
 /** Runs test cases through the current model and explains each score. */
 @Service
 public class TestRunner {
+
+    /** Longest text value accepted for a string feature. */
+    static final int MAX_TEXT_LENGTH = 256;
+
+    /** Whole numbers above this cannot be represented exactly by every JSON client. */
+    private static final double MAX_EXACT_DOUBLE = 9_007_199_254_740_992.0;
 
     public record InputMapping(String input, String feature) {}
 
@@ -47,7 +55,15 @@ public class TestRunner {
         if (rows.size() > props.run().maxRows()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "A run can have at most " + props.run().maxRows() + " test cases.");
         }
-        LoadedModel model = registry.current();
+        LoadedModel model = registry.lease();
+        try {
+            return execute(model, mapping, rows, started);
+        } finally {
+            model.release();
+        }
+    }
+
+    private RunResult execute(LoadedModel model, List<InputMapping> mapping, List<Map<String, Object>> rows, long started) {
         Analysis analysis = model.analysis();
         if (!analysis.usable()) {
             throw new ApiException(HttpStatus.CONFLICT, "The uploaded model cannot be run. Check the model analysis first.");
@@ -55,15 +71,15 @@ public class TestRunner {
 
         List<Feature> features = resolveFeatures(analysis, mapping);
         int n = features.size();
-        List<Object> baseline = features.stream().map(f -> baselineValue(f)).toList();
+        List<Object> baseline = features.stream().map(f -> coerceValue(f, f.baseline())).toList();
         double baselineScore = Double.NaN;
 
         List<CaseResult> results = new ArrayList<>();
         try {
             for (int r = 0; r < rows.size(); r++) {
                 List<Object> actual = new ArrayList<>();
-                for (Feature f : features) {
-                    actual.add(coerce(f, rows.get(r).get(f.name()), r + 1));
+                for (int i = 0; i < n; i++) {
+                    actual.add(coerce(features.get(i), model.specs().get(i), rows.get(r).get(features.get(i).name()), r + 1));
                 }
                 double[] subsets = new double[1 << n];
                 for (int mask = 0; mask < subsets.length; mask++) {
@@ -83,16 +99,23 @@ public class TestRunner {
                 results.add(new CaseResult(subsets[subsets.length - 1], contributions));
             }
         } catch (OrtException e) {
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The model failed to run: " + firstLine(e.getMessage()));
+            throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "The model failed to run: " + firstLine(e.getMessage()));
         }
         long elapsed = (System.nanoTime() - started) / 1_000_000;
         return new RunResult(analysis.scoreOutput(), elapsed, baselineScore, results);
     }
 
+    /** Pairs every model input, in model order, with the feature chosen for it. */
     private List<Feature> resolveFeatures(Analysis analysis, List<InputMapping> mapping) {
         List<Analysis.Input> inputs = analysis.inputs();
         if (mapping.size() != inputs.size()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "The mapping must cover all " + inputs.size() + " model inputs.");
+        }
+        Set<String> seenInputs = new HashSet<>();
+        for (InputMapping m : mapping) {
+            if (!seenInputs.add(m.input())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Input \"" + m.input() + "\" appears more than once in the mapping.");
+            }
         }
         List<Feature> features = new ArrayList<>();
         Set<String> used = new HashSet<>();
@@ -114,37 +137,61 @@ public class TestRunner {
         return features;
     }
 
-    private static Object baselineValue(Feature f) {
-        return coerceValue(f, f.baseline(), "baseline");
-    }
-
-    private static Object coerce(Feature f, Object raw, int row) {
+    private static Object coerce(Feature f, LoadedModel.TensorSpec spec, Object raw, int row) {
         if (raw == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Test case " + row + ": \"" + f.name() + "\" needs a value.");
         }
+        Object value;
         try {
-            return coerceValue(f, raw, "test case " + row);
+            value = coerceValue(f, raw);
         } catch (IllegalArgumentException e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Test case " + row + ": " + e.getMessage());
         }
+        if (spec.type() == OnnxJavaType.INT32 && value instanceof Long l && (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Test case " + row + ": \"" + f.name() + "\" is outside the range this model accepts (-2147483648 to 2147483647).");
+        }
+        return value;
     }
 
-    private static Object coerceValue(Feature f, Object raw, String where) {
-        FeatureKind kind = f.kind();
-        return switch (kind) {
+    private static Object coerceValue(Feature f, Object raw) {
+        return switch (f.kind()) {
             case BOOLEAN -> {
                 if (raw instanceof Boolean b) yield b;
                 throw new IllegalArgumentException("\"" + f.name() + "\" must be true or false.");
             }
-            case INTEGER -> {
-                if (raw instanceof Number num && num.doubleValue() == Math.rint(num.doubleValue())) yield num.longValue();
-                throw new IllegalArgumentException("\"" + f.name() + "\" must be a whole number.");
-            }
+            case INTEGER -> toLong(f, raw);
             case STRING -> {
-                if (raw instanceof String s && !s.isBlank()) yield s;
-                throw new IllegalArgumentException("\"" + f.name() + "\" must be text.");
+                if (!(raw instanceof String s) || s.isBlank()) {
+                    throw new IllegalArgumentException("\"" + f.name() + "\" must be text.");
+                }
+                if (s.length() > MAX_TEXT_LENGTH) {
+                    throw new IllegalArgumentException("\"" + f.name() + "\" is longer than " + MAX_TEXT_LENGTH + " characters.");
+                }
+                yield s;
             }
         };
+    }
+
+    private static long toLong(Feature f, Object raw) {
+        String whole = "\"" + f.name() + "\" must be a whole number.";
+        String range = "\"" + f.name() + "\" is too large. Use a whole number that fits in 64 bits.";
+        try {
+            if (raw instanceof Byte || raw instanceof Short || raw instanceof Integer || raw instanceof Long) {
+                return ((Number) raw).longValue();
+            }
+            if (raw instanceof BigInteger b) return b.longValueExact();
+            if (raw instanceof BigDecimal d) return d.toBigIntegerExact().longValueExact();
+            if (raw instanceof Double || raw instanceof Float) {
+                double d = ((Number) raw).doubleValue();
+                if (Double.isNaN(d) || Double.isInfinite(d) || d != Math.rint(d)) throw new IllegalArgumentException(whole);
+                if (Math.abs(d) > MAX_EXACT_DOUBLE) throw new IllegalArgumentException(range);
+                return (long) d;
+            }
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException(raw instanceof BigDecimal d && d.scale() > 0 ? whole : range);
+        }
+        throw new IllegalArgumentException(whole);
     }
 
     private static String firstLine(String s) {

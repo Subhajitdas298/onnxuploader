@@ -10,7 +10,7 @@ import { useState, type KeyboardEvent } from 'react';
 import TypeChip from '../../components/TypeChip';
 import { monoFont } from '../../theme';
 import type { AnalysisInput, Feature, FeatureKind } from '../../types';
-import { normalize } from './logic';
+import { normalize, withArticle } from './logic';
 
 interface Props {
   input: AnalysisInput;
@@ -22,9 +22,11 @@ interface Props {
   onDropFeature: (name: string) => void;
   onPlaceArmed: () => void;
   onClear: () => void;
+  /** Does any feature of this input's type have a name that matches the input? */
+  hasNameMatch: boolean;
 }
 
-export default function InputCard({ input, feature, dragKind, armed, onDropFeature, onPlaceArmed, onClear }: Props) {
+export default function InputCard({ input, feature, dragKind, armed, onDropFeature, onPlaceArmed, onClear, hasNameMatch }: Props) {
   const [over, setOver] = useState(false);
   const accepts = dragKind !== null && dragKind === input.kind;
   const rejects = dragKind !== null && dragKind !== input.kind;
@@ -119,10 +121,10 @@ export default function InputCard({ input, feature, dragKind, armed, onDropFeatu
             </>
           ) : (
             <Box>
-              <Typography sx={{ fontWeight: 500 }}>{input.supported ? `Drop a ${input.kind?.toLowerCase()} feature here` : 'No feature can feed this input'}</Typography>
+              <Typography sx={{ fontWeight: 500 }}>{input.supported ? `Drop ${withArticle(input.kind ?? 'supported')} feature here` : 'No feature can feed this input'}</Typography>
               {input.supported && (
                 <Typography variant="caption" color="error">
-                  Required. No feature name matches “{input.name}”.
+                  {hasNameMatch ? 'Required.' : `Required. No feature name matches “${input.name}”.`}
                 </Typography>
               )}
             </Box>

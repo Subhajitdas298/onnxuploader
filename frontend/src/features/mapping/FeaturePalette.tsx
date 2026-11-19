@@ -11,7 +11,7 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { useState, type KeyboardEvent } from 'react';
-import TypeChip, { KIND_ACCENT, KIND_LABEL } from '../../components/TypeChip';
+import TypeChip, { KIND_ACCENT } from '../../components/TypeChip';
 import { monoFont } from '../../theme';
 import type { Feature, FeatureKind } from '../../types';
 
@@ -128,7 +128,6 @@ function FeatureCard({
       role="button"
       tabIndex={0}
       aria-pressed={armed}
-      aria-label={`${feature.name}, ${KIND_LABEL[feature.kind]}${usedBy >= 0 ? `, used by input ${usedBy + 1}` : ''}`}
       onClick={onArm}
       onKeyDown={onKey}
       onDragStart={(e) => {

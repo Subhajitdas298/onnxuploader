@@ -35,6 +35,10 @@ export const theme = createTheme({
     h2: { fontSize: '1rem', fontWeight: 500 },
   },
   components: {
+    // Respect the "reduce motion" system setting for every animation and transition, including MUI's own.
+    MuiCssBaseline: {
+      styleOverrides: `@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important; } }`,
+    },
     MuiButton: { defaultProps: { disableElevation: true }, styleOverrides: { root: { textTransform: 'none', fontWeight: 500, letterSpacing: '.2px' } } },
     MuiPaper: { defaultProps: { variant: 'outlined' } },
     MuiAppBar: { defaultProps: { elevation: 0 } },

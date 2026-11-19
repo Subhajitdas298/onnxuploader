@@ -31,3 +31,7 @@ replay_pid*
 node_modules/
 dist/
 .env.local
+
+# Test output
+test-results/
+playwright-report/

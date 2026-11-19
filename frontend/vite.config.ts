@@ -9,5 +9,5 @@ export default defineConfig({
     proxy: { '/api': 'http://localhost:8080' },
   },
   build: { chunkSizeWarningLimit: 1500 },
-  test: { environment: 'node' },
+  test: { environment: 'node', include: ['src/**/*.test.ts'] },
 });

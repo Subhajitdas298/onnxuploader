@@ -19,31 +19,37 @@ public class ModelRegistry {
         this.analyzer = analyzer;
     }
 
-    public synchronized LoadedModel current() {
-        var info = store.info().orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "No model has been uploaded yet."));
-        if (cached != null && cached.version().equals(info.version())) {
-            return cached;
+    /** The analysis of the stored model. */
+    public Analysis analysis() {
+        LoadedModel model = lease();
+        try {
+            return model.analysis();
+        } finally {
+            model.release();
         }
-        var content = store.download();
-        LoadedModel loaded = analyzer.load(content.version(), content.bytes());
-        close(cached);
-        cached = loaded;
-        return loaded;
+    }
+
+    /** The current model, kept alive until {@link LoadedModel#release()} is called. */
+    public synchronized LoadedModel lease() {
+        var info = store.info().orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "No model has been uploaded yet."));
+        if (cached == null || !cached.version().equals(info.version())) {
+            var content = store.download();
+            LoadedModel loaded = analyzer.load(content.version(), content.bytes());
+            LoadedModel old = cached;
+            cached = loaded;
+            if (old != null) old.release();
+        }
+        if (!cached.tryAcquire()) {
+            throw new IllegalStateException("The model was released while it was current.");
+        }
+        return cached;
     }
 
     @PreDestroy
     synchronized void shutdown() {
-        close(cached);
-        cached = null;
-    }
-
-    private static void close(LoadedModel m) {
-        if (m != null && m.session() != null) {
-            try {
-                m.session().close();
-            } catch (Exception ignored) {
-                // nothing useful to do
-            }
+        if (cached != null) {
+            cached.release();
+            cached = null;
         }
     }
 }

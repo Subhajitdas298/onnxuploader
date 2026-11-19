@@ -7,7 +7,10 @@ export interface CsvColumn {
 }
 
 export const MAX_ROWS = 50;
-export const INTEGER = /^-?\d+$/;
+const INTEGER = /^-?\d+$/;
+
+/** A whole number that every JSON client can carry exactly (up to 2^53 - 1). */
+export const isWholeNumber = (raw: string) => INTEGER.test(raw) && Number.isSafeInteger(Number(raw));
 
 export interface CsvResult {
   rows: Record<string, CellValue>[];
@@ -43,7 +46,7 @@ export function parseTestCsv(text: string, columns: CsvColumn[]): CsvResult {
         else if (/^(false|0|no)$/i.test(raw)) row[c.feature] = false;
         else errors.push(`Line ${line}: “${raw}” is not true or false for ${c.feature}.`);
       } else if (c.kind === 'INTEGER') {
-        if (!INTEGER.test(raw)) errors.push(`Line ${line}: “${raw}” is not a whole number for ${c.feature}.`);
+        if (!isWholeNumber(raw)) errors.push(`Line ${line}: “${raw}” is not a whole number for ${c.feature}.`);
         row[c.feature] = raw;
       } else {
         if (!raw) errors.push(`Line ${line}: ${c.feature} is empty.`);

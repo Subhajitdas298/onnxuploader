@@ -10,6 +10,7 @@ import com.azure.storage.blob.models.BlobServiceProperties;
 import com.azure.storage.blob.models.UserDelegationKey;
 import com.azure.storage.blob.sas.BlobSasPermission;
 import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
+import com.azure.storage.common.sas.SasProtocol;
 import com.example.fraudrunner.api.ApiException;
 import com.example.fraudrunner.config.AppProperties;
 import java.time.OffsetDateTime;
@@ -84,7 +85,7 @@ class AzureBlobModelStore implements ModelStore {
         try {
             long size = blob.getProperties().getBlobSize();
             if (size > config.maxModelBytes()) {
-                throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE,
+                throw new ApiException(HttpStatus.CONTENT_TOO_LARGE,
                         "The model is larger than the " + (config.maxModelBytes() / 1_048_576) + " MB limit.");
             }
             var response = blob.downloadContentWithResponse(null, null, null, null);
@@ -103,7 +104,10 @@ class AzureBlobModelStore implements ModelStore {
         OffsetDateTime start = now.minusMinutes(5);
         OffsetDateTime expiry = now.plus(config.sasValidity());
         BlobSasPermission permission = new BlobSasPermission().setCreatePermission(true).setWritePermission(true);
-        BlobServiceSasSignatureValues values = new BlobServiceSasSignatureValues(expiry, permission).setStartTime(start);
+        // Real Azure endpoints are https only, so the link must not work over plain http. Local Azurite is http.
+        SasProtocol protocol = blob.getBlobUrl().startsWith("https://") ? SasProtocol.HTTPS_ONLY : SasProtocol.HTTPS_HTTP;
+        BlobServiceSasSignatureValues values =
+                new BlobServiceSasSignatureValues(expiry, permission).setStartTime(start).setProtocol(protocol);
 
         String sas;
         if (config.usesAccountKey()) {

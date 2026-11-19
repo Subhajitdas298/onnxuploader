@@ -11,7 +11,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { useGetModelInfoQuery } from '../../api/api';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { goTo } from '../../app/wizardSlice';
@@ -19,6 +19,18 @@ import { fmtBytes } from '../../components/format';
 import StepHeader from '../../components/StepHeader';
 import { monoFont } from '../../theme';
 import { uploadModel } from './uploadSlice';
+
+const VISUALLY_HIDDEN = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
 
 export default function UploadStep() {
   const dispatch = useAppDispatch();
@@ -36,13 +48,6 @@ export default function UploadStep() {
     setOver(false);
     if (!busy) pick(e.dataTransfer.files[0]);
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      input.current?.click();
-    }
-  };
-
   const phaseText =
     phase === 'preparing' ? 'Preparing secure upload' : phase === 'uploading' ? 'Uploading to Azure Blob Storage' : 'Uploaded. Starting analysis';
 
@@ -103,18 +108,18 @@ export default function UploadStep() {
               </>
             ) : (
               <Paper
-                role="button"
-                tabIndex={0}
-                aria-label="Choose or drop an ONNX file"
-                onClick={() => input.current?.click()}
-                onKeyDown={onKey}
+                data-testid="dropzone"
+                onClick={(e) => {
+                  // the button's own label already opens the chooser
+                  if (!(e.target as HTMLElement).closest('label')) input.current?.click();
+                }}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setOver(true);
                 }}
                 onDragLeave={() => setOver(false)}
                 onDrop={onDrop}
-                sx={(t) => ({
+                sx={{
                   border: '2px dashed',
                   borderColor: over ? 'primary.main' : 'divider',
                   bgcolor: over ? 'action.hover' : 'transparent',
@@ -123,30 +128,31 @@ export default function UploadStep() {
                   textAlign: 'center',
                   cursor: 'pointer',
                   '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' },
-                  ...t.applyStyles('dark', {}),
-                })}
+                }}
               >
+                {/* The whole area can be clicked or dropped on. The button is the one control for keyboard and screen reader users. */}
                 <Stack spacing={1} color="text.secondary" sx={{ alignItems: 'center' }}>
                   <CloudUploadOutlined sx={{ fontSize: 40 }} />
                   <Typography sx={{ color: 'text.primary', fontWeight: 500, fontSize: 16 }}>Drag and drop your .onnx file here</Typography>
                   <Typography variant="body2">or</Typography>
-                  <Button variant="contained" component="span" tabIndex={-1}>
+                  {/* A real file input inside the button label: keyboard and screen reader users get the native control. */}
+                  <Button component="label" variant="contained" role={undefined} tabIndex={-1} sx={{ '&:focus-within': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 } }}>
                     Browse files
+                    <input
+                      ref={input}
+                      type="file"
+                      accept=".onnx"
+                      style={VISUALLY_HIDDEN}
+                      onChange={(e) => {
+                        pick(e.target.files?.[0]);
+                        e.target.value = '';
+                      }}
+                    />
                   </Button>
                   <Typography variant="caption">Single file · .onnx · up to 25 MB · replaces the current model</Typography>
                 </Stack>
               </Paper>
             )}
-            <input
-              ref={input}
-              type="file"
-              accept=".onnx"
-              hidden
-              onChange={(e) => {
-                pick(e.target.files?.[0]);
-                e.target.value = '';
-              }}
-            />
           </Stack>
         </Paper>
 

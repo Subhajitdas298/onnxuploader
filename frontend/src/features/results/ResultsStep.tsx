@@ -78,7 +78,7 @@ function ResultCard({ index, result, order, baseline }: { index: number; result:
   const inputs = order.map((f) => result.contributions.find((c) => c.feature === f)).filter((c): c is Contribution => !!c);
 
   return (
-    <Paper sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0,1fr)' }, overflow: 'hidden' }}>
+    <Paper data-testid="result-card" data-score={result.score} data-baseline={baseline} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0,1fr)' }, overflow: 'hidden' }}>
       <Box sx={{ p: 2.5, bgcolor: 'action.hover', borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: 'divider' }}>
         <Typography variant="caption" color="text.secondary">
           Test {index + 1}
@@ -86,7 +86,7 @@ function ResultCard({ index, result, order, baseline }: { index: number; result:
         <Typography aria-label={`Risk score ${result.score.toFixed(2)}`} sx={{ fontSize: 44, fontWeight: 500, lineHeight: 1.05, letterSpacing: '-.5px', fontVariantNumeric: 'tabular-nums' }}>
           {result.score.toFixed(2)}
         </Typography>
-        <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, result.score * 100))} sx={{ my: 1, height: 6, borderRadius: 3 }} />
+        <LinearProgress variant="determinate" aria-label={`Score bar, ${result.score.toFixed(2)} of 1`} value={Math.max(0, Math.min(100, result.score * 100))} sx={{ my: 1, height: 6, borderRadius: 3 }} />
         <Typography variant="caption" color="text.secondary">
           Risk score, 0 to 1
         </Typography>
@@ -116,6 +116,9 @@ function ResultCard({ index, result, order, baseline }: { index: number; result:
           {result.contributions.map((c, i) => (
             <Box
               key={c.feature}
+              data-testid="contribution"
+              data-feature={c.feature}
+              data-value={c.contribution}
               sx={{ display: 'grid', gridTemplateColumns: { xs: '24px minmax(0,1fr) 56px', sm: '24px minmax(120px,200px) minmax(0,1fr) 56px' }, gap: 1.5, alignItems: 'center' }}
             >
               <Box sx={{ width: 22, height: 22, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 500, bgcolor: 'action.hover', color: 'text.secondary' }}>{i + 1}</Box>

@@ -19,7 +19,7 @@ import { monoFont } from '../../theme';
 import type { Analysis } from '../../types';
 import FeaturePalette from './FeaturePalette';
 import InputCard from './InputCard';
-import { incompatibility } from './logic';
+import { autoMatch, incompatibility } from './logic';
 import { assign, init, resetToAuto, unassign } from './mappingSlice';
 
 export default function MappingStep() {
@@ -80,6 +80,7 @@ export default function MappingStep() {
   const mappedCount = analysis.inputs.filter((_, i) => assignment[i]).length;
   const total = analysis.inputs.length;
   const complete = mappedCount === total && analysis.usable;
+  const suggestions = autoMatch(analysis.inputs, features);
   const armedFeature = armed ? byName.get(armed) ?? null : null;
   const draggingFeature = dragging ? byName.get(dragging) ?? null : null;
 
@@ -139,6 +140,7 @@ export default function MappingStep() {
                 onDropFeature={(name) => place(i, name)}
                 onPlaceArmed={() => armed && place(i, armed)}
                 onClear={() => dispatch(unassign(i))}
+                hasNameMatch={suggestions[i] !== null}
               />
             ))}
           </Stack>

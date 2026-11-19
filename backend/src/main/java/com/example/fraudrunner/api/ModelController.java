@@ -52,7 +52,7 @@ class ModelController {
 
     @GetMapping("/model/analysis")
     AnalysisResponse analysis() {
-        Analysis a = registry.current().analysis();
+        Analysis a = registry.analysis();
         Header header = a.header() == null ? null : new Header(
                 a.header().graphName(), a.header().producerName(), a.header().producerVersion(), a.header().domain(),
                 a.header().irVersion(), a.header().modelVersion(), a.header().docString(),

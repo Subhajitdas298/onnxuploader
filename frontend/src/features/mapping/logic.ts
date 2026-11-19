@@ -14,8 +14,11 @@ export function autoMatch(inputs: AnalysisInput[], features: Feature[]): (string
   });
 }
 
+/** "an integer", "a string", "a boolean" */
+export const withArticle = (word: string) => `${word.toLowerCase() === 'integer' ? 'an' : 'a'} ${word.toLowerCase()}`;
+
 export function incompatibility(input: AnalysisInput, feature: Feature): string | null {
   if (input.kind === feature.kind) return null;
-  const need = input.kind ? input.kind.toLowerCase() : 'unsupported';
-  return `“${feature.name}” is a ${feature.kind.toLowerCase()} feature. Input “${input.name}” needs a ${need} one.`;
+  const need = input.kind ? withArticle(input.kind) : 'a supported';
+  return `“${feature.name}” is ${withArticle(feature.kind)} feature. Input “${input.name}” needs ${need} one.`;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisInput, Feature } from '../../types';
-import { autoMatch, incompatibility } from './logic';
+import { autoMatch, incompatibility, withArticle } from './logic';
 import reducer, { assign, init, unassign } from './mappingSlice';
 
 const features: Feature[] = [
@@ -26,8 +26,17 @@ describe('autoMatch', () => {
 
 describe('incompatibility', () => {
   it('explains a type mismatch and allows a match', () => {
-    expect(incompatibility(inputs[2], features[0])).toContain('needs a string');
+    expect(incompatibility(inputs[2], features[0])).toBe('“amount_cents” is an integer feature. Input “country” needs a string one.');
+    expect(incompatibility(inputs[0], features[2])).toBe('“country_code” is a string feature. Input “Amount-Cents” needs an integer one.');
     expect(incompatibility(inputs[2], features[2])).toBeNull();
+  });
+});
+
+describe('withArticle', () => {
+  it('uses an for integer only', () => {
+    expect(withArticle('INTEGER')).toBe('an integer');
+    expect(withArticle('STRING')).toBe('a string');
+    expect(withArticle('BOOLEAN')).toBe('a boolean');
   });
 });
 
