@@ -1,0 +1,135 @@
+name: Deploy
+
+# Every push to main builds and deploys infrastructure, API and UI. Authentication is OIDC (no stored passwords),
+# set up once with infra/bootstrap.sh. Needs the secrets AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-fraudrunner-demo' }}
+
+jobs:
+  infra:
+    name: Azure infrastructure
+    runs-on: ubuntu-latest
+    outputs:
+      registryName: ${{ steps.deploy.outputs.registryName }}
+      registryLoginServer: ${{ steps.deploy.outputs.registryLoginServer }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # First pass without the container app, so the registry exists before the image is pushed.
+      - id: deploy
+        name: Deploy registry, storage and environment
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name infra-base \
+            --template-file infra/main.bicep \
+            --parameters deployApp=false \
+            --query 'properties.outputs.{registryName:registryName.value,registryLoginServer:registryLoginServer.value}' -o json > out.json
+          echo "registryName=$(jq -r .registryName out.json)" >> "$GITHUB_OUTPUT"
+          echo "registryLoginServer=$(jq -r .registryLoginServer out.json)" >> "$GITHUB_OUTPUT"
+
+  backend:
+    name: API image and container app
+    needs: infra
+    runs-on: ubuntu-latest
+    outputs:
+      apiUrl: ${{ steps.app.outputs.apiUrl }}
+      uiUrl: ${{ steps.app.outputs.uiUrl }}
+      uiStorageName: ${{ steps.app.outputs.uiStorageName }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test
+        working-directory: backend
+        run: ./gradlew test
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to the registry
+        run: az acr login --name "${{ needs.infra.outputs.registryName }}"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ needs.infra.outputs.registryLoginServer }}/fraud-runner-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: app
+        name: Deploy the container app with the new image
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name infra-app \
+            --template-file infra/main.bicep \
+            --parameters deployApp=true apiImage="${{ needs.infra.outputs.registryLoginServer }}/fraud-runner-api:${{ github.sha }}" \
+            --query 'properties.outputs.{apiUrl:apiUrl.value,uiUrl:uiUrl.value,uiStorageName:uiStorageName.value}' -o json > out.json
+          echo "apiUrl=$(jq -r .apiUrl out.json)" >> "$GITHUB_OUTPUT"
+          echo "uiUrl=$(jq -r .uiUrl out.json)" >> "$GITHUB_OUTPUT"
+          echo "uiStorageName=$(jq -r .uiStorageName out.json)" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: UI to static website
+    needs: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ needs.backend.outputs.apiUrl }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Publish to the static website
+        env:
+          UI_STORAGE: ${{ needs.backend.outputs.uiStorageName }}
+        run: |
+          KEY=$(az storage account keys list --resource-group "$RESOURCE_GROUP" --account-name "$UI_STORAGE" --query '[0].value' -o tsv)
+          az storage blob service-properties update --account-name "$UI_STORAGE" --account-key "$KEY" \
+            --static-website --index-document index.html --404-document index.html
+          az storage blob upload-batch --account-name "$UI_STORAGE" --account-key "$KEY" \
+            --destination '$web' --source frontend/dist --overwrite
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed"
+            echo "- UI: ${{ needs.backend.outputs.uiUrl }}"
+            echo "- API: ${{ needs.backend.outputs.apiUrl }}/api/features"
+          } >> "$GITHUB_STEP_SUMMARY"

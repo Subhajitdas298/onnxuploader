@@ -1,0 +1,35 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: fraud-runner
+  lifecycle:
+    timeout-per-shutdown-phase: 10s
+
+app:
+  storage:
+    provider: azure
+    connection-string: ${STORAGE_CONNECTION_STRING:}
+    endpoint: ${STORAGE_ENDPOINT:}
+    container: ${STORAGE_CONTAINER:models}
+    blob-name: ${MODEL_BLOB_NAME:model.onnx}
+    sas-validity: 15m
+    max-model-bytes: 26214400
+    ensure-container: true
+    configure-cors: ${STORAGE_CONFIGURE_CORS:false}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  run:
+    max-rows: 50
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
