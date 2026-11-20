@@ -7,6 +7,7 @@ import PlayArrow from '@mui/icons-material/PlayArrow';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
@@ -28,8 +29,8 @@ import StepHeader from '../../components/StepHeader';
 import TypeChip from '../../components/TypeChip';
 import { monoFont } from '../../theme';
 import type { CellValue, FeatureKind, TestRunRequest } from '../../types';
-import { isWholeNumber, parseTestCsv } from './csv';
-import { addRow, csvFailed, csvLoaded, deleteRow, setCell, triedRun, type TestRow } from './testsSlice';
+import { isNumber, isWholeNumber, parseTestCsv } from './csv';
+import { DEFAULT_TOLERANCE, addRow, csvFailed, csvLoaded, deleteRow, setCell, setExpected, setTolerance, triedRun, type TestRow } from './testsSlice';
 
 interface Column {
   feature: string;
@@ -45,12 +46,17 @@ function cellInvalid(kind: FeatureKind, value: CellValue | undefined): boolean {
   return kind === 'INTEGER' ? !isWholeNumber(v) : v === '';
 }
 
+/** The expected score has to be a number. */
+const expectedInvalid = (v: string) => !isNumber(v);
+/** The tolerance has to be a number that is 0 or more. */
+const toleranceInvalid = (v: string) => !isNumber(v) || Number(v) < 0;
+
 export default function TestDataStep() {
   const dispatch = useAppDispatch();
   const { data: features } = useGetFeaturesQuery();
   const { data: analysis } = useGetAnalysisQuery();
   const assignment = useAppSelector((s) => s.mapping.assignment);
-  const { rows, csv, triedRun: tried } = useAppSelector((s) => s.tests);
+  const { rows, tolerance, csv, triedRun: tried } = useAppSelector((s) => s.tests);
   const [run, { isLoading, error }] = useRunTestsMutation();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -63,7 +69,11 @@ export default function TestDataStep() {
     inputName: input.name,
   }));
 
-  const invalidCount = rows.reduce((n, r) => n + columns.filter((c) => cellInvalid(c.kind, r.values[c.feature])).length, 0);
+  const invalidCount = rows.reduce(
+    (n, r) => n + columns.filter((c) => cellInvalid(c.kind, r.values[c.feature])).length + (expectedInvalid(r.expected) ? 1 : 0),
+    0,
+  );
+  const toleranceBad = toleranceInvalid(tolerance);
 
   const loadCsv = async (file: File) => {
     const result = parseTestCsv(await file.text(), columns);
@@ -72,13 +82,15 @@ export default function TestDataStep() {
   };
 
   const submit = async () => {
-    if (rows.length === 0 || invalidCount > 0) {
+    if (rows.length === 0 || invalidCount > 0 || toleranceBad) {
       dispatch(triedRun());
       return;
     }
     const body: TestRunRequest = {
       mapping: columns.map((c) => ({ input: c.inputName, feature: c.feature })),
+      tolerance: Number(tolerance),
       rows: rows.map((r) => ({
+        expected: Number(r.expected),
         values: Object.fromEntries(
           columns.map((c) => {
             const v = r.values[c.feature];
@@ -98,15 +110,16 @@ export default function TestDataStep() {
 
   const empty = rows.length === 0;
   const showInvalid = tried && invalidCount > 0;
+  const showToleranceError = toleranceBad && (tried || tolerance !== DEFAULT_TOLERANCE);
 
   return (
     <>
       <StepHeader title="Test data">
-        Enter feature values for each test case, or load them from a CSV file. At least one test case is required.
+        Enter feature values and the risk score you expect for each test case, or load them from a CSV file. A test passes when the model's score is within the tolerance of the expected score. At least one test case is required.
       </StepHeader>
       <Stack spacing={2}>
         <Paper>
-          <Stack direction="row" spacing={1} sx={{ p: '14px 20px', borderBottom: 1, borderColor: 'divider' }}>
+          <Stack direction="row" useFlexGap sx={{ p: '14px 20px', borderBottom: 1, borderColor: 'divider', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button size="small" variant="outlined" startIcon={<Add />} onClick={() => dispatch(addRow())}>
               Add row
             </Button>
@@ -124,11 +137,21 @@ export default function TestDataStep() {
                 if (f) void loadCsv(f);
               }}
             />
+            <Box sx={{ flex: 1 }} />
+            <TextField
+              size="small"
+              label="Tolerance ±"
+              value={tolerance}
+              error={showToleranceError}
+              onChange={(e) => dispatch(setTolerance(e.target.value))}
+              sx={{ width: 150 }}
+              slotProps={{ htmlInput: { inputMode: 'decimal', 'aria-label': 'Tolerance' } }}
+            />
           </Stack>
-          <Box sx={{ px: 2.5, py: 1.25, borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
+          <Box sx={{ px: 2.5, py: 1.25, borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover', overflowWrap: 'anywhere' }}>
             <Typography variant="caption" color="text.secondary">
-              CSV needs a header row: <span style={{ fontFamily: monoFont, color: 'inherit' }}>{columns.map((c) => c.feature).join(',')}</span>. Values are
-              true or false, whole numbers or text. Column order does not matter. Loading a file replaces the rows below.
+              CSV needs a header row: <span style={{ fontFamily: monoFont, color: 'inherit' }}>{[...columns.map((c) => c.feature), 'expected_score'].join(',')}</span>.
+              Values are true or false, whole numbers or text, and the expected score is a number. Column order does not matter. Loading a file replaces the rows below.
             </Typography>
           </Box>
           {csv && (
@@ -169,13 +192,22 @@ export default function TestDataStep() {
                       </Stack>
                     </TableCell>
                   ))}
+                  <TableCell>
+                    <Typography sx={{ fontFamily: monoFont, fontSize: 13, fontWeight: 500, color: 'text.primary' }}>Expected risk score</Typography>
+                    <Stack direction="row" spacing={0.75} sx={{ mt: 0.5, alignItems: 'center' }}>
+                      <Chip size="small" variant="outlined" label={analysis.outputs.find((o) => o.score)?.name ?? 'score'} sx={{ fontFamily: monoFont }} />
+                      <Typography variant="caption" color="text.secondary">
+                        number
+                      </Typography>
+                    </Stack>
+                  </TableCell>
                   <TableCell sx={{ width: 56 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
                 {empty ? (
                   <TableRow>
-                    <TableCell colSpan={columns.length + 2} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={columns.length + 3} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       No test cases yet. Add a row or load a CSV file.
                     </TableCell>
                   </TableRow>
@@ -196,14 +228,16 @@ export default function TestDataStep() {
             Back
           </Button>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-            <Stack direction="row" spacing={0.75} role="status" sx={{ alignItems: 'center',  color: empty || showInvalid ? 'error.main' : 'text.secondary' }}>
-              {(empty || showInvalid) && <ErrorOutlined fontSize="small" />}
+            <Stack direction="row" spacing={0.75} role="status" sx={{ alignItems: 'center', color: empty || showInvalid || showToleranceError ? 'error.main' : 'text.secondary' }}>
+              {(empty || showInvalid || showToleranceError) && <ErrorOutlined fontSize="small" />}
               <Typography variant="body2">
                 {empty
                   ? 'Add at least one test case'
-                  : showInvalid
-                    ? `${invalidCount} ${invalidCount === 1 ? 'cell needs' : 'cells need'} a value`
-                    : `${rows.length} test case${rows.length === 1 ? '' : 's'}`}
+                  : showToleranceError
+                    ? 'The tolerance must be a number, 0 or more'
+                    : showInvalid
+                      ? `${invalidCount} ${invalidCount === 1 ? 'cell needs' : 'cells need'} a value`
+                      : `${rows.length} test case${rows.length === 1 ? '' : 's'}`}
               </Typography>
             </Stack>
             <Button
@@ -264,6 +298,17 @@ function GridRow({ row, index, columns, tried }: { row: TestRow; index: number; 
           </TableCell>
         );
       })}
+      <TableCell>
+        <TextField
+          size="small"
+          fullWidth
+          value={row.expected}
+          error={expectedInvalid(row.expected) && (tried || row.expected !== '')}
+          placeholder="0.00"
+          onChange={(e) => dispatch(setExpected({ id: row.id, value: e.target.value }))}
+          slotProps={{ htmlInput: { 'aria-label': `Expected risk score, row ${index + 1}`, inputMode: 'decimal', style: { textAlign: 'right', minWidth: 90 } } }}
+        />
+      </TableCell>
       <TableCell>
         <IconButton aria-label={`Delete row ${index + 1}`} onClick={() => dispatch(deleteRow(row.id))}>
           <DeleteOutlined />

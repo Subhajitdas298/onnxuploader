@@ -5,6 +5,8 @@ import { uploadModel } from '../upload/uploadSlice';
 export interface TestRow {
   id: number;
   values: Record<string, CellValue>;
+  /** The score the model is expected to give, as typed. */
+  expected: string;
 }
 
 export interface CsvStatus {
@@ -13,21 +15,25 @@ export interface CsvStatus {
   errors?: string[];
 }
 
+export const DEFAULT_TOLERANCE = '0.05';
+
 interface TestsState {
   rows: TestRow[];
+  /** How far a score may be from the expected score and still pass, as typed. */
+  tolerance: string;
   nextId: number;
   csv: CsvStatus | null;
   triedRun: boolean;
 }
 
-const initialState: TestsState = { rows: [{ id: 1, values: {} }], nextId: 2, csv: null, triedRun: false };
+const initialState: TestsState = { rows: [{ id: 1, values: {}, expected: '' }], tolerance: DEFAULT_TOLERANCE, nextId: 2, csv: null, triedRun: false };
 
 const slice = createSlice({
   name: 'tests',
   initialState,
   reducers: {
     addRow(state) {
-      state.rows.push({ id: state.nextId++, values: {} });
+      state.rows.push({ id: state.nextId++, values: {}, expected: '' });
       state.csv = null;
     },
     deleteRow(state, action: PayloadAction<number>) {
@@ -38,8 +44,15 @@ const slice = createSlice({
       const row = state.rows.find((r) => r.id === action.payload.id);
       if (row) row.values[action.payload.feature] = action.payload.value;
     },
-    csvLoaded(state, action: PayloadAction<{ name: string; rows: Record<string, CellValue>[] }>) {
-      state.rows = action.payload.rows.map((values) => ({ id: state.nextId++, values }));
+    setExpected(state, action: PayloadAction<{ id: number; value: string }>) {
+      const row = state.rows.find((r) => r.id === action.payload.id);
+      if (row) row.expected = action.payload.value;
+    },
+    setTolerance(state, action: PayloadAction<string>) {
+      state.tolerance = action.payload;
+    },
+    csvLoaded(state, action: PayloadAction<{ name: string; rows: { values: Record<string, CellValue>; expected: string }[] }>) {
+      state.rows = action.payload.rows.map((r) => ({ id: state.nextId++, values: r.values, expected: r.expected }));
       state.csv = { name: action.payload.name, count: action.payload.rows.length };
       state.triedRun = false;
     },
@@ -55,5 +68,5 @@ const slice = createSlice({
   },
 });
 
-export const { addRow, deleteRow, setCell, csvLoaded, csvFailed, triedRun } = slice.actions;
+export const { addRow, deleteRow, setCell, setExpected, setTolerance, csvLoaded, csvFailed, triedRun } = slice.actions;
 export default slice.reducer;

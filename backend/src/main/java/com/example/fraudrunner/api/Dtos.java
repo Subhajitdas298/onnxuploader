@@ -2,6 +2,7 @@ package com.example.fraudrunner.api;
 
 import com.example.fraudrunner.feature.FeatureKind;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -48,15 +49,16 @@ public final class Dtos {
 
     public record TestRunRequest(
             @NotEmpty List<@Valid InputMappingDto> mapping,
+            @NotNull @DecimalMin("0") Double tolerance,
             @NotEmpty List<@Valid TestRowDto> rows) {}
 
     public record InputMappingDto(@NotBlank String input, @NotBlank String feature) {}
 
-    public record TestRowDto(@NotNull Map<String, Object> values) {}
+    public record TestRowDto(@NotNull Map<String, Object> values, @NotNull Double expected) {}
 
-    public record TestRunResponse(String output, long elapsedMs, double baselineScore, List<TestCaseResult> results) {}
+    public record TestRunResponse(String output, long elapsedMs, double baselineScore, double tolerance, List<TestCaseResult> results) {}
 
-    public record TestCaseResult(double score, List<ContributionDto> contributions) {}
+    public record TestCaseResult(double score, double expected, double delta, boolean passed, List<ContributionDto> contributions) {}
 
     public record ContributionDto(String feature, Object value, double contribution) {}
 }

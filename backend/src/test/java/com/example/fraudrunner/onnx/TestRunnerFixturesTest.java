@@ -62,10 +62,16 @@ class TestRunnerFixturesTest {
         return row;
     }
 
+
+    /** Runs rows without caring about the expected score: expected 0 with a tolerance that always passes. */
+    private TestRunner.RunResult runRows(List<TestRunner.InputMapping> mapping, List<Map<String, Object>> rows) {
+        return runner.run(mapping, 1e9, rows.stream().map(r -> new TestRunner.TestCase(r, 0.0)).toList());
+    }
+
     @Test
     void allTenFeaturesGiveExactContributionsForAnAdditiveModel() {
         store.put(Fixtures.fixture("all_features"));
-        var result = runner.run(ALL_TEN, List.of(allTenRow()));
+        var result = runRows(ALL_TEN, List.of(allTenRow()));
         var r = result.results().get(0);
 
         // The model is a plain sum, so each feature's contribution is (its term) - (its term at the baseline value).
@@ -90,8 +96,8 @@ class TestRunnerFixturesTest {
         store.put(Fixtures.fixture("all_features"));
         List<TestRunner.InputMapping> shuffled = new ArrayList<>(ALL_TEN);
         java.util.Collections.reverse(shuffled);
-        var a = runner.run(ALL_TEN, List.of(allTenRow())).results().get(0).score();
-        var b = runner.run(shuffled, List.of(allTenRow())).results().get(0).score();
+        var a = runRows(ALL_TEN, List.of(allTenRow())).results().get(0).score();
+        var b = runRows(shuffled, List.of(allTenRow())).results().get(0).score();
         assertThat(b).isEqualTo(a);
     }
 
@@ -105,7 +111,7 @@ class TestRunnerFixturesTest {
             rows.add(row);
         }
         long t = System.nanoTime();
-        var result = runner.run(ALL_TEN, rows);
+        var result = runRows(ALL_TEN, rows);
         long ms = (System.nanoTime() - t) / 1_000_000;
         System.out.println("50 rows x 10 features = 51,200 model runs in " + ms + " ms");
         assertThat(result.results()).hasSize(50);
@@ -116,11 +122,11 @@ class TestRunnerFixturesTest {
     void int32InputsRejectValuesOutsideTheirRange() {
         store.put(Fixtures.fixture("int32_input"));
         var mapping = map("txn_count_24h", "txn_count_24h");
-        assertThat(runner.run(mapping, List.of(Map.of("txn_count_24h", 2_147_483_647L))).results()).hasSize(1);
-        assertThat(runner.run(mapping, List.of(Map.of("txn_count_24h", -2_147_483_648L))).results()).hasSize(1);
-        assertThatThrownBy(() -> runner.run(mapping, List.of(Map.of("txn_count_24h", 2_147_483_648L))))
+        assertThat(runRows(mapping, List.of(Map.of("txn_count_24h", 2_147_483_647L))).results()).hasSize(1);
+        assertThat(runRows(mapping, List.of(Map.of("txn_count_24h", -2_147_483_648L))).results()).hasSize(1);
+        assertThatThrownBy(() -> runRows(mapping, List.of(Map.of("txn_count_24h", 2_147_483_648L))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("outside the range");
-        assertThatThrownBy(() -> runner.run(mapping, List.of(Map.of("txn_count_24h", -3_000_000_000L))))
+        assertThatThrownBy(() -> runRows(mapping, List.of(Map.of("txn_count_24h", -3_000_000_000L))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("Test case 1");
     }
 
@@ -145,7 +151,7 @@ class TestRunnerFixturesTest {
     }
 
     private TestRunner.RunResult run(List<TestRunner.InputMapping> mapping, Object amount) {
-        return runner.run(mapping, List.of(Map.of("amount_cents", amount)));
+        return runRows(mapping, List.of(Map.of("amount_cents", amount)));
     }
 
     @Test
@@ -154,21 +160,21 @@ class TestRunnerFixturesTest {
         var mapping = map("amount_cents", "amount_cents", "is_international", "is_international", "country", "country_code");
         java.util.function.Function<Object, Map<String, Object>> row =
                 country -> Map.of("amount_cents", 100, "is_international", true, "country_code", country);
-        assertThat(runner.run(mapping, List.of(row.apply("日本"))).results()).hasSize(1);
-        assertThat(runner.run(mapping, List.of(row.apply("N'G\"; DROP TABLE"))).results()).hasSize(1);
-        assertThat(runner.run(mapping, List.of(row.apply("x".repeat(256)))).results()).hasSize(1);
-        assertThatThrownBy(() -> runner.run(mapping, List.of(row.apply("x".repeat(257)))))
+        assertThat(runRows(mapping, List.of(row.apply("日本"))).results()).hasSize(1);
+        assertThat(runRows(mapping, List.of(row.apply("N'G\"; DROP TABLE"))).results()).hasSize(1);
+        assertThat(runRows(mapping, List.of(row.apply("x".repeat(256)))).results()).hasSize(1);
+        assertThatThrownBy(() -> runRows(mapping, List.of(row.apply("x".repeat(257)))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("longer than");
-        assertThatThrownBy(() -> runner.run(mapping, List.of(row.apply("   ")))).isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> runner.run(mapping, List.of(row.apply(42)))).isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> runner.run(mapping, List.of(Map.of("amount_cents", 100, "is_international", "true", "country_code", "US"))))
+        assertThatThrownBy(() -> runRows(mapping, List.of(row.apply("   ")))).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> runRows(mapping, List.of(row.apply(42)))).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> runRows(mapping, List.of(Map.of("amount_cents", 100, "is_international", "true", "country_code", "US"))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("true or false");
     }
 
     @Test
     void theOutputNamedRiskScoreIsUsedEvenWhenItIsNotFirst() {
         store.put(Fixtures.fixture("two_outputs"));
-        var result = runner.run(map("amount_cents", "amount_cents"), List.of(Map.of("amount_cents", 100000)));
+        var result = runRows(map("amount_cents", "amount_cents"), List.of(Map.of("amount_cents", 100000)));
         assertThat(result.output()).isEqualTo("risk_score");
         assertThat(result.results().get(0).score()).isCloseTo(100.0, within(1e-3)); // 100000 * 0.001, not the 7x debug output
     }
@@ -177,7 +183,7 @@ class TestRunnerFixturesTest {
     void doubleOutputsAndDynamicAndScalarShapesRun() {
         for (String fixture : List.of("double_output", "dynamic_dims", "scalar_input")) {
             store.put(Fixtures.fixture(fixture));
-            var result = runner.run(map("amount_cents", "amount_cents"), List.of(Map.of("amount_cents", 5000)));
+            var result = runRows(map("amount_cents", "amount_cents"), List.of(Map.of("amount_cents", 5000)));
             assertThat(result.results().get(0).score()).as(fixture).isCloseTo(5.0, within(1e-4));
         }
     }
@@ -186,7 +192,7 @@ class TestRunnerFixturesTest {
     void unusableModelsAreRefusedWithAConflict() {
         for (String fixture : List.of("float_input", "vector_input", "int_output", "no_inputs")) {
             store.put(Fixtures.fixture(fixture));
-            assertThatThrownBy(() -> runner.run(map("amount_cents", "amount_cents"), List.of(Map.of("amount_cents", 1))))
+            assertThatThrownBy(() -> runRows(map("amount_cents", "amount_cents"), List.of(Map.of("amount_cents", 1))))
                     .as(fixture).isInstanceOf(ApiException.class).hasMessageContaining("cannot be run");
         }
     }
@@ -195,13 +201,13 @@ class TestRunnerFixturesTest {
     void mappingProblemsAreReportedClearly() {
         store.put(Fixtures.sample());
         var rows = List.<Map<String, Object>>of(Map.of("amount_cents", 1, "is_international", true, "country_code", "US"));
-        assertThatThrownBy(() -> runner.run(map("amount_cents", "amount_cents", "is_international", "is_international", "nope", "country_code"), rows))
+        assertThatThrownBy(() -> runRows(map("amount_cents", "amount_cents", "is_international", "is_international", "nope", "country_code"), rows))
                 .isInstanceOf(ApiException.class).hasMessageContaining("has no feature");
-        assertThatThrownBy(() -> runner.run(map("amount_cents", "amount_cents", "is_international", "is_international", "country", "not_a_feature"), rows))
+        assertThatThrownBy(() -> runRows(map("amount_cents", "amount_cents", "is_international", "is_international", "country", "not_a_feature"), rows))
                 .isInstanceOf(ApiException.class).hasMessageContaining("Unknown feature");
-        assertThatThrownBy(() -> runner.run(map("amount_cents", "amount_cents"), rows))
+        assertThatThrownBy(() -> runRows(map("amount_cents", "amount_cents"), rows))
                 .isInstanceOf(ApiException.class).hasMessageContaining("cover all 3");
-        assertThatThrownBy(() -> runner.run(map("amount_cents", "amount_cents", "amount_cents", "amount_cents", "country", "country_code"), rows))
+        assertThatThrownBy(() -> runRows(map("amount_cents", "amount_cents", "amount_cents", "amount_cents", "country", "country_code"), rows))
                 .isInstanceOf(ApiException.class).hasMessageContaining("more than once");
     }
 
@@ -211,7 +217,7 @@ class TestRunnerFixturesTest {
         var mapping = map("amount_cents", "amount_cents", "is_international", "is_international", "country", "country_code");
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < 51; i++) rows.add(Map.of("amount_cents", 1, "is_international", true, "country_code", "US"));
-        assertThatThrownBy(() -> runner.run(mapping, rows)).isInstanceOf(ApiException.class).hasMessageContaining("at most 50");
+        assertThatThrownBy(() -> runRows(mapping, rows)).isInstanceOf(ApiException.class).hasMessageContaining("at most 50");
     }
 
     @Test
@@ -229,7 +235,7 @@ class TestRunnerFixturesTest {
             for (int t = 0; t < 8; t++) {
                 futures.add(pool.submit((Callable<Double>) () -> {
                     double last = 0;
-                    for (int i = 0; i < 40; i++) last = runner.run(mapping, rows).results().get(0).score();
+                    for (int i = 0; i < 40; i++) last = runRows(mapping, rows).results().get(0).score();
                     return last;
                 }));
             }

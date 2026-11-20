@@ -1,11 +1,13 @@
 import type { Page } from '@playwright/test';
 import {
-  autoMappedModelReadyForTests, clearModel, csvOf, expect, fixture, loadCsv, SAMPLE_CSV, sampleReadyForTests, test,
+  autoMappedModelReadyForTests, clearModel, csvOf, expect, fillRow, fixture, loadCsv, SAMPLE_CSV, sampleReadyForTests, test,
 } from './support';
 
-const HEADER = ['amount_cents', 'is_international', 'country_code'];
+const HEADER = ['amount_cents', 'is_international', 'country_code', 'expected_score'];
 const amount = (page: Page, row: number) => page.getByLabel(`amount_cents, row ${row}`);
 const country = (page: Page, row: number) => page.getByLabel(`country_code, row ${row}`);
+const expected = (page: Page, row: number) => page.getByLabel(`Expected risk score, row ${row}`);
+const tolerance = (page: Page) => page.getByLabel('Tolerance');
 const international = (page: Page, row: number) => page.getByRole('switch', { name: `is_international, row ${row}` });
 const rowCount = (page: Page) => page.locator('tbody tr').filter({ has: page.getByLabel(/^amount_cents, row/) }).count();
 const status = (page: Page) => page.getByRole('status');
@@ -17,22 +19,27 @@ test.beforeEach(async ({ page }) => {
 
 test('the grid has one column per model input, in order, with the right control for each type', async ({ page }) => {
   const headers = await page.locator('thead th').allInnerTexts();
-  expect(headers.join(' ')).toMatch(/amount_cents[\s\S]*Integer[\s\S]*input #1[\s\S]*is_international[\s\S]*Boolean[\s\S]*input #2[\s\S]*country_code[\s\S]*String[\s\S]*input #3/);
+  expect(headers.join(' ')).toMatch(/amount_cents[\s\S]*Integer[\s\S]*input #1[\s\S]*is_international[\s\S]*Boolean[\s\S]*input #2[\s\S]*country_code[\s\S]*String[\s\S]*input #3[\s\S]*Expected risk score[\s\S]*risk_score/);
   await expect(amount(page, 1)).toHaveAttribute('inputmode', 'numeric');
   await expect(international(page, 1)).not.toBeChecked();
   await expect(country(page, 1)).toBeVisible();
+  await expect(expected(page, 1)).toBeVisible();
+  await expect(tolerance(page)).toHaveValue('0.05');
   await expect(status(page)).toHaveText('1 test case');
 });
 
 test('one blank row exists to start with, and running it shows what is missing', async ({ page }) => {
   await page.getByRole('button', { name: 'Run tests' }).click();
-  await expect(status(page)).toHaveText('2 cells need a value');
+  await expect(status(page)).toHaveText('3 cells need a value');
   await expect(amount(page, 1)).toHaveAttribute('aria-invalid', 'true');
   await expect(country(page, 1)).toHaveAttribute('aria-invalid', 'true');
+  await expect(expected(page, 1)).toHaveAttribute('aria-invalid', 'true');
   await expect(page.getByRole('heading', { name: 'Test data' })).toBeVisible();   // did not leave the screen
   await amount(page, 1).fill('1000');
   await country(page, 1).fill('US');
-  await expect(amount(page, 1)).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(status(page)).toHaveText('1 cell needs a value');       // the expected score is still missing
+  await expected(page, 1).fill('0.05');
+  await expect(expected(page, 1)).not.toHaveAttribute('aria-invalid', 'true');
   await expect(status(page)).toHaveText('1 test case');
 });
 
@@ -47,9 +54,41 @@ test('integer cells accept only whole numbers a browser can hold exactly', async
 test('text cells must not be blank', async ({ page }) => {
   await amount(page, 1).fill('10');
   await country(page, 1).fill('   ');
+  await expected(page, 1).fill('0.5');
   await page.getByRole('button', { name: 'Run tests' }).click();
   await expect(country(page, 1)).toHaveAttribute('aria-invalid', 'true');
   await expect(status(page)).toHaveText('1 cell needs a value');
+});
+
+test('the expected score must be a number', async ({ page }) => {
+  for (const [value, ok] of [['abc', false], ['1,5', false], ['0x1', false], ['--1', false], ['0.9', true], ['.5', true], ['1', true], ['-0.2', true], ['1e-2', true], ['100', true]] as const) {
+    await expected(page, 1).fill(value);
+    await expect(expected(page, 1), `value ${value}`).toHaveAttribute('aria-invalid', ok ? 'false' : 'true');
+  }
+});
+
+test('the tolerance defaults to 0.05, can be changed and must be a number of 0 or more', async ({ page }) => {
+  await fillRow(page, 1, { amount: 1000, country: 'US', expected: 0.05 });
+  await expect(tolerance(page)).toHaveValue('0.05');
+  for (const bad of ['abc', '-0.1', '', '0,1']) {
+    await tolerance(page).fill(bad);
+    await expect(tolerance(page), `tolerance "${bad}"`).toHaveAttribute('aria-invalid', 'true');
+    await expect(status(page)).toHaveText('The tolerance must be a number, 0 or more');
+    await page.getByRole('button', { name: 'Run tests' }).click();
+    await expect(page.getByRole('heading', { name: 'Test data' })).toBeVisible();   // running is refused
+  }
+  for (const good of ['0', '1', '.2', '0.001']) {
+    await tolerance(page).fill(good);
+    await expect(tolerance(page), `tolerance "${good}"`).toHaveAttribute('aria-invalid', 'false');
+    await expect(status(page)).toHaveText('1 test case');
+  }
+});
+
+test('the tolerance is kept when moving between screens', async ({ page }) => {
+  await tolerance(page).fill('0.25');
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.getByRole('button', { name: 'Continue to test data' }).click();
+  await expect(tolerance(page)).toHaveValue('0.25');
 });
 
 test('boolean cells are switches that read Yes or No', async ({ page }) => {
@@ -89,6 +128,9 @@ test.describe('CSV import', () => {
     await expect(international(page, 2)).toBeChecked();
     await expect(international(page, 1)).not.toBeChecked();
     await expect(country(page, 3)).toHaveValue('GB');
+    await expect(expected(page, 1)).toHaveValue('0.05');
+    await expect(expected(page, 2)).toHaveValue('0.90');
+    await expect(expected(page, 3)).toHaveValue('0.55');
     await expect(status(page)).toHaveText('3 test cases');
   });
 
@@ -96,7 +138,7 @@ test.describe('CSV import', () => {
     await loadCsv(page, SAMPLE_CSV);
     await amount(page, 1).fill('5');
     await expect(amount(page, 1)).toHaveValue('5');
-    await loadCsv(page, csvOf(HEADER, [[7, true, 'DE']]));
+    await loadCsv(page, csvOf(HEADER, [[7, true, 'DE', 0.4]]));
     expect(await rowCount(page)).toBe(1);
     await expect(amount(page, 1)).toHaveValue('7');
     await expect(page.getByText('Loaded 1 test case from tests.csv')).toBeVisible();
@@ -111,35 +153,49 @@ test.describe('CSV import', () => {
   });
 
   test('column order, case, spaces, extra columns, Windows line endings and a byte order mark are all fine', async ({ page }) => {
-    const text = '﻿ Country_Code ,note,AMOUNT_CENTS,Is_International\r\nFR,first,100,YES\r\n\r\nDE,second,200,0\r\n';
+    const text = '﻿ Country_Code ,note,AMOUNT_CENTS,Is_International,EXPECTED_SCORE\r\nFR,first,100,YES,0.3\r\n\r\nDE,second,200,0,.7\r\n';
     await loadCsv(page, Buffer.from(text, 'utf8'));
     await expect(page.getByText('Loaded 2 test cases from tests.csv')).toBeVisible();
     await expect(country(page, 1)).toHaveValue('FR');
     await expect(amount(page, 2)).toHaveValue('200');
     await expect(international(page, 1)).toBeChecked();
     await expect(international(page, 2)).not.toBeChecked();
+    await expect(expected(page, 1)).toHaveValue('0.3');
+    await expect(expected(page, 2)).toHaveValue('.7');
   });
 
   test('a missing column is named and nothing is loaded', async ({ page }) => {
     await amount(page, 1).fill('42');
-    await loadCsv(page, csvOf(['amount_cents', 'is_international'], [[1, true]]));
+    await loadCsv(page, csvOf(['amount_cents', 'is_international', 'expected_score'], [[1, true, 0.5]]));
     await expect(page.getByText('Could not load tests.csv')).toBeVisible();
     await expect(page.getByText('Missing column “country_code”.')).toBeVisible();
     await expect(amount(page, 1)).toHaveValue('42');    // the existing row is untouched
   });
 
+  test('a missing expected score column is named', async ({ page }) => {
+    await loadCsv(page, csvOf(['amount_cents', 'is_international', 'country_code'], [[1, true, 'US']]));
+    await expect(page.getByText('Missing column “expected_score”.')).toBeVisible();
+  });
+
+  test('the expected column may also be called "expected"', async ({ page }) => {
+    await loadCsv(page, csvOf(['amount_cents', 'is_international', 'country_code', 'expected'], [[1, true, 'US', 0.5]]));
+    await expect(page.getByText('Loaded 1 test case from tests.csv')).toBeVisible();
+    await expect(expected(page, 1)).toHaveValue('0.5');
+  });
+
   test('bad values are listed with their line numbers', async ({ page }) => {
-    await loadCsv(page, csvOf(HEADER, [[10, 'maybe', 'US'], [1.5, true, ''], [3, false, 'US']]));
+    await loadCsv(page, csvOf(HEADER, [[10, 'maybe', 'US', 0.5], [1.5, true, '', 'high'], [3, false, 'US', 0.5]]));
     for (const line of [
       'Line 2: “maybe” is not true or false for is_international.',
       'Line 3: “1.5” is not a whole number for amount_cents.',
       'Line 3: country_code is empty.',
+      'Line 3: “high” is not a number for expected_score.',
     ]) await expect(page.getByText(line)).toBeVisible();
     await expect(page.getByText('Loaded')).toHaveCount(0);
   });
 
   test('more than five errors are summarized', async ({ page }) => {
-    await loadCsv(page, csvOf(HEADER, Array.from({ length: 4 }, () => ['x', 'maybe', '']))); // 3 errors per line
+    await loadCsv(page, csvOf(HEADER, Array.from({ length: 4 }, () => ['x', 'maybe', '', 'n/a']))); // 3 errors per line
     await expect(page.getByText(/and \d+ more/)).toBeVisible();
   });
 
@@ -153,7 +209,7 @@ test.describe('CSV import', () => {
   });
 
   test('fifty test cases are accepted and fifty-one are not', async ({ page }) => {
-    const rows = (n: number) => Array.from({ length: n }, (_, i) => [i + 1, i % 2 === 0, 'US']);
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => [i + 1, i % 2 === 0, 'US', 0.5]);
     await loadCsv(page, csvOf(HEADER, rows(51)));
     await expect(page.getByText('The file has 51 test cases. The limit is 50.')).toBeVisible();
     await loadCsv(page, csvOf(HEADER, rows(50)));
@@ -165,6 +221,7 @@ test.describe('CSV import', () => {
 test('a model that only accepts 32-bit integers has its range enforced by the service', async ({ page }) => {
   await clearModel();
   await autoMappedModelReadyForTests(page, fixture('int32_input'));
+  await page.getByLabel('Expected risk score, row 1').fill('0.5');
   await page.getByLabel('txn_count_24h, row 1').fill('3000000000');
   await page.getByRole('button', { name: 'Run tests' }).click();
   await expect(page.getByRole('alert')).toContainText('outside the range this model accepts');
@@ -175,8 +232,7 @@ test('a model that only accepts 32-bit integers has its range enforced by the se
 });
 
 test('a service error while running is shown without losing the test data', async ({ page }) => {
-  await amount(page, 1).fill('1000');
-  await country(page, 1).fill('US');
+  await fillRow(page, 1, { amount: 1000, country: 'US', expected: 0.05 });
   await page.route('**/api/model/test-run', (route) =>
     route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ detail: 'Something went wrong on the server.' }) }),
   );

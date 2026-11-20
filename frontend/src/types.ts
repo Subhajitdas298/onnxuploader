@@ -64,7 +64,9 @@ export type CellValue = string | boolean;
 
 export interface TestRunRequest {
   mapping: { input: string; feature: string }[];
-  rows: { values: Record<string, boolean | number | string> }[];
+  /** A test passes when its score is within this distance of the expected score. */
+  tolerance: number;
+  rows: { values: Record<string, boolean | number | string>; expected: number }[];
 }
 
 export interface Contribution {
@@ -75,6 +77,10 @@ export interface Contribution {
 
 export interface TestCaseResult {
   score: number;
+  expected: number;
+  /** score minus expected */
+  delta: number;
+  passed: boolean;
   contributions: Contribution[];
 }
 
@@ -82,5 +88,6 @@ export interface TestRunResponse {
   output: string;
   elapsedMs: number;
   baselineScore: number;
+  tolerance: number;
   results: TestCaseResult[];
 }

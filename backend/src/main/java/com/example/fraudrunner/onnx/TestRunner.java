@@ -31,9 +31,13 @@ public class TestRunner {
 
     public record Contribution(String feature, Object value, double contribution) {}
 
-    public record CaseResult(double score, List<Contribution> contributions) {}
+    /** One test case: the feature values to score and the score that is expected for them. */
+    public record TestCase(Map<String, Object> values, double expected) {}
 
-    public record RunResult(String output, long elapsedMs, double baselineScore, List<CaseResult> results) {}
+    /** The model's score for a case, how far it is from the expected score, and the features that drove it. */
+    public record CaseResult(double score, double expected, double delta, boolean passed, List<Contribution> contributions) {}
+
+    public record RunResult(String output, long elapsedMs, double baselineScore, double tolerance, List<CaseResult> results) {}
 
     private final ModelRegistry registry;
     private final Inference inference;
@@ -47,7 +51,8 @@ public class TestRunner {
         this.props = props;
     }
 
-    public RunResult run(List<InputMapping> mapping, List<Map<String, Object>> rows) {
+    /** A test passes when its score is within {@code tolerance} of the expected score (both ends included). */
+    public RunResult run(List<InputMapping> mapping, double tolerance, List<TestCase> rows) {
         long started = System.nanoTime();
         if (rows.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Add at least one test case.");
@@ -55,15 +60,23 @@ public class TestRunner {
         if (rows.size() > props.run().maxRows()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "A run can have at most " + props.run().maxRows() + " test cases.");
         }
+        if (!Double.isFinite(tolerance) || tolerance < 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "The tolerance must be a number that is 0 or more.");
+        }
+        for (int r = 0; r < rows.size(); r++) {
+            if (!Double.isFinite(rows.get(r).expected())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Test case " + (r + 1) + ": the expected score must be a number.");
+            }
+        }
         LoadedModel model = registry.lease();
         try {
-            return execute(model, mapping, rows, started);
+            return execute(model, mapping, tolerance, rows, started);
         } finally {
             model.release();
         }
     }
 
-    private RunResult execute(LoadedModel model, List<InputMapping> mapping, List<Map<String, Object>> rows, long started) {
+    private RunResult execute(LoadedModel model, List<InputMapping> mapping, double tolerance, List<TestCase> rows, long started) {
         Analysis analysis = model.analysis();
         if (!analysis.usable()) {
             throw new ApiException(HttpStatus.CONFLICT, "The uploaded model cannot be run. Check the model analysis first.");
@@ -79,7 +92,7 @@ public class TestRunner {
             for (int r = 0; r < rows.size(); r++) {
                 List<Object> actual = new ArrayList<>();
                 for (int i = 0; i < n; i++) {
-                    actual.add(coerce(features.get(i), model.specs().get(i), rows.get(r).get(features.get(i).name()), r + 1));
+                    actual.add(coerce(features.get(i), model.specs().get(i), rows.get(r).values().get(features.get(i).name()), r + 1));
                 }
                 double[] subsets = new double[1 << n];
                 for (int mask = 0; mask < subsets.length; mask++) {
@@ -96,13 +109,15 @@ public class TestRunner {
                     contributions.add(new Contribution(features.get(i).name(), actual.get(i), phi[i]));
                 }
                 contributions.sort(Comparator.comparingDouble((Contribution c) -> Math.abs(c.contribution())).reversed());
-                results.add(new CaseResult(subsets[subsets.length - 1], contributions));
+                double score = subsets[subsets.length - 1];
+                double expected = rows.get(r).expected();
+                results.add(new CaseResult(score, expected, score - expected, Math.abs(score - expected) <= tolerance + 1e-9, contributions));
             }
         } catch (OrtException e) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "The model failed to run: " + firstLine(e.getMessage()));
         }
         long elapsed = (System.nanoTime() - started) / 1_000_000;
-        return new RunResult(analysis.scoreOutput(), elapsed, baselineScore, results);
+        return new RunResult(analysis.scoreOutput(), elapsed, baselineScore, tolerance, results);
     }
 
     /** Pairs every model input, in model order, with the feature chosen for it. */

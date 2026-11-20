@@ -1,8 +1,11 @@
 import ArrowBack from '@mui/icons-material/ArrowBack';
+import CancelOutlined from '@mui/icons-material/CancelOutlined';
+import CheckCircleOutlined from '@mui/icons-material/CheckCircleOutlined';
 import PlayArrow from '@mui/icons-material/PlayArrow';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
@@ -27,7 +30,7 @@ export default function ResultsStep() {
 
   const head = (
     <StepHeader title="Risk scores">
-      The model scored each test case. Higher scores mean higher fraud risk. Under each score, the features are sorted by how much they contributed.
+      Each score is compared with the expected score you entered. Higher scores mean higher fraud risk. Under each score, the features are sorted by how much they contributed.
     </StepHeader>
   );
 
@@ -42,18 +45,29 @@ export default function ResultsStep() {
     );
   }
 
+  const failed = data.results.filter((r) => !r.passed).length;
+
   return (
     <>
       {head}
       <Stack spacing={2}>
-        <Alert severity="info">
-          <b>
-            {data.results.length} test case{data.results.length === 1 ? '' : 's'} scored
-          </b>{' '}
+        {failed === 0 ? (
+          <Alert severity="success">
+            <b>{data.results.length === 1 ? 'The test passed' : `All ${data.results.length} tests passed`}</b> Every score is within ±{data.tolerance} of the expected score.
+          </Alert>
+        ) : (
+          <Alert severity="warning">
+            <b>
+              {failed} of {data.results.length} test{data.results.length === 1 ? '' : 's'} failed
+            </b>{' '}
+            The score was more than ±{data.tolerance} from the expected score. Check the expected values, the tolerance or the model.
+          </Alert>
+        )}
+        <Typography variant="caption" color="text.secondary">
           Output <span style={{ fontFamily: monoFont }}>{data.output}</span> · ran in {data.elapsedMs} ms
-        </Alert>
+        </Typography>
         {data.results.map((r, i) => (
-          <ResultCard key={i} index={i} result={r} order={assignment} baseline={data.baselineScore} />
+          <ResultCard key={i} index={i} result={r} order={assignment} baseline={data.baselineScore} tolerance={data.tolerance} />
         ))}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
           <Button startIcon={<ArrowBack />} onClick={() => dispatch(goTo(2))}>
@@ -73,23 +87,54 @@ export default function ResultsStep() {
   );
 }
 
-function ResultCard({ index, result, order, baseline }: { index: number; result: TestCaseResult; order: (string | null)[]; baseline: number }) {
+function ResultCard({
+  index,
+  result,
+  order,
+  baseline,
+  tolerance,
+}: {
+  index: number;
+  result: TestCaseResult;
+  order: (string | null)[];
+  baseline: number;
+  tolerance: number;
+}) {
   const max = Math.max(0.01, ...result.contributions.map((c) => Math.abs(c.contribution)));
   const inputs = order.map((f) => result.contributions.find((c) => c.feature === f)).filter((c): c is Contribution => !!c);
 
   return (
-    <Paper data-testid="result-card" data-score={result.score} data-baseline={baseline} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0,1fr)' }, overflow: 'hidden' }}>
+    <Paper data-testid="result-card" data-score={result.score} data-baseline={baseline} data-passed={result.passed} data-expected={result.expected} data-delta={result.delta} sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0,1fr)' }, overflow: 'hidden', borderColor: result.passed ? 'divider' : 'error.main' }}>
       <Box sx={{ p: 2.5, bgcolor: 'action.hover', borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: 'divider' }}>
-        <Typography variant="caption" color="text.secondary">
-          Test {index + 1}
-        </Typography>
+        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="caption" color="text.secondary">
+            Test {index + 1}
+          </Typography>
+          <Chip
+            size="small"
+            color={result.passed ? 'success' : 'error'}
+            variant="outlined"
+            icon={result.passed ? <CheckCircleOutlined /> : <CancelOutlined />}
+            label={result.passed ? 'Pass' : 'Fail'}
+          />
+        </Stack>
         <Typography aria-label={`Risk score ${result.score.toFixed(2)}`} sx={{ fontSize: 44, fontWeight: 500, lineHeight: 1.05, letterSpacing: '-.5px', fontVariantNumeric: 'tabular-nums' }}>
           {result.score.toFixed(2)}
         </Typography>
         <LinearProgress variant="determinate" aria-label={`Score bar, ${result.score.toFixed(2)} of 1`} value={Math.max(0, Math.min(100, result.score * 100))} sx={{ my: 1, height: 6, borderRadius: 3 }} />
         <Typography variant="caption" color="text.secondary">
-          Risk score, 0 to 1
+          Risk score
         </Typography>
+        <Box sx={{ mt: 1, display: 'grid', gridTemplateColumns: 'auto auto', justifyContent: 'space-between', rowGap: 0.25, fontSize: 13 }}>
+          <Box sx={{ color: 'text.secondary' }}>Expected</Box>
+          <Box sx={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+            {result.expected.toFixed(2)} ± {tolerance}
+          </Box>
+          <Box sx={{ color: 'text.secondary' }}>Off by</Box>
+          <Box sx={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: result.passed ? 'text.primary' : 'error.main' }} data-testid="delta">
+            {signed(result.delta)}
+          </Box>
+        </Box>
         <Stack spacing={0.75} sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: 'divider' }}>
           {inputs.map((c) => (
             <Box key={c.feature} sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, fontSize: 12.5, fontFamily: monoFont }}>

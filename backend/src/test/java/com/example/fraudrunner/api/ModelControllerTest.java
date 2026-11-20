@@ -76,7 +76,8 @@ class ModelControllerTest {
                 {"mapping":[{"input":"amount_cents","feature":"amount_cents"},
                             {"input":"is_international","feature":"is_international"},
                             {"input":"country","feature":"country_code"}],
-                 "rows":[{"values":{"amount_cents":89900,"is_international":true,"country_code":"NG"}}]}""";
+                 "tolerance":0.05,
+                 "rows":[{"values":{"amount_cents":89900,"is_international":true,"country_code":"NG"},"expected":0.90}]}""";
         mvc.perform(post("/api/model/test-run").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.results", hasSize(1)))

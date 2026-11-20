@@ -1,4 +1,4 @@
-"""Generates the demo fraud-risk ONNX model and a matching test CSV.
+"""Generates the demo fraud-risk ONNX model and a matching test CSV (feature values plus the expected score).
 
 Usage:  python generate_model.py        (needs: pip install onnx onnxruntime numpy)
 
@@ -82,9 +82,10 @@ def main():
     sess = ort.InferenceSession(str(path))
     with open(HERE / "test-data.csv", "w", newline="") as f:
         w = csv.writer(f, lineterminator="\n")
-        w.writerow(["amount_cents", "is_international", "country_code"])
+        w.writerow(["amount_cents", "is_international", "country_code", "expected_score"])
         for r in rows:
-            w.writerow([r[0], str(r[1]).lower(), r[2]])
+            # the expected score is the model's own score rounded to two decimals, so these cases pass with the default tolerance
+            w.writerow([r[0], str(r[1]).lower(), r[2], f"{reference(*r):.2f}"])
     for amount, intl, country in rows:
         out = sess.run(None, {
             "amount_cents": np.array([[amount]], dtype=np.int64),

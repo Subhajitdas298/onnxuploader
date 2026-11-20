@@ -73,6 +73,16 @@ export async function autoMappedModelReadyForTests(page: Page, file: string) {
 export const csvOf = (header: string[], rows: (string | number | boolean)[][]) =>
   Buffer.from([header.join(','), ...rows.map((r) => r.join(','))].join('\n'));
 
+/** Types one test case into a grid row (rows are numbered from 1). */
+export async function fillRow(page: Page, row: number, v: { amount: number | string; international?: boolean; country: string; expected: number | string }) {
+  await page.getByLabel(`amount_cents, row ${row}`).fill(String(v.amount));
+  const sw = page.getByRole('switch', { name: `is_international, row ${row}` });
+  if (v.international) await sw.check();
+  else await sw.uncheck();
+  await page.getByLabel(`country_code, row ${row}`).fill(v.country);
+  await page.getByLabel(`Expected risk score, row ${row}`).fill(String(v.expected));
+}
+
 export async function loadCsv(page: Page, csv: Buffer | string, name = 'tests.csv') {
   await csvInput(page).setInputFiles(typeof csv === 'string' ? csv : { name, mimeType: 'text/csv', buffer: csv });
 }
@@ -86,13 +96,20 @@ export function sampleScore(cents: number, international: boolean, country: stri
 export async function readResults(page: Page) {
   const cards = page.getByTestId('result-card');
   const count = await cards.count();
-  const out: { score: number; baseline: number; contributions: { feature: string; value: number }[] }[] = [];
+  const out: { score: number; baseline: number; expected: number; delta: number; passed: boolean; contributions: { feature: string; value: number }[] }[] = [];
   for (let i = 0; i < count; i++) {
     const card = cards.nth(i);
     const contributions = await card.getByTestId('contribution').evaluateAll((els) =>
       els.map((e) => ({ feature: e.getAttribute('data-feature')!, value: Number(e.getAttribute('data-value')) })),
     );
-    out.push({ score: Number(await card.getAttribute('data-score')), baseline: Number(await card.getAttribute('data-baseline')), contributions });
+    out.push({
+      score: Number(await card.getAttribute('data-score')),
+      baseline: Number(await card.getAttribute('data-baseline')),
+      expected: Number(await card.getAttribute('data-expected')),
+      delta: Number(await card.getAttribute('data-delta')),
+      passed: (await card.getAttribute('data-passed')) === 'true',
+      contributions,
+    });
   }
   return out;
 }
