@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import {
-  autoMappedModelReadyForTests, clearModel, csvOf, expect, fixture, loadCsv, readResults, SAMPLE_CSV, sampleReadyForTests,
+  autoMappedModelReadyForTests, fillRow, clearModel, csvOf, expect, fixture, loadCsv, readResults, SAMPLE_CSV, sampleReadyForTests,
   sampleScore, step, test, uploadModel, SAMPLE_MODEL,
 } from './support';
 
@@ -22,9 +22,84 @@ test('the sample files give the documented scores, and every score matches the r
   const expected = [sampleScore(1250, false, 'US'), sampleScore(89900, true, 'NG'), sampleScore(45000, true, 'GB')];
   results.forEach((r, i) => expect(r.score).toBeCloseTo(expected[i], 4));
   expect(results.map((r) => r.score.toFixed(2))).toEqual(['0.05', '0.90', '0.55']);
+  expect(results.map((r) => r.passed)).toEqual([true, true, true]);
+  expect(results.map((r) => r.expected)).toEqual([0.05, 0.9, 0.55]);
   await expect(page.getByRole('img', { name: /Risk score/ })).toHaveCount(0);
   await expect(page.getByLabel('Risk score 0.90')).toBeVisible();
-  await expect(page.getByText('3 test cases scored')).toBeVisible();
+  await expect(page.getByText('All 3 tests passed')).toBeVisible();
+});
+
+test.describe('expected scores and tolerance', () => {
+  test.beforeEach(async ({ page }) => {
+    await sampleReadyForTests(page);
+    await loadCsv(page, SAMPLE_CSV);
+  });
+
+  const delta = (page: Page, card: number) => page.getByTestId('result-card').nth(card).getByTestId('delta');
+
+  test('when every score is within the tolerance the run passes', async ({ page }) => {
+    await run(page);
+    await expect(page.getByText('All 3 tests passed')).toBeVisible();
+    await expect(page.getByText('Every score is within ±0.05 of the expected score.')).toBeVisible();
+    for (let i = 0; i < 3; i++) await expect(page.getByTestId('result-card').nth(i)).toContainText('Pass');
+    await expect(page.getByTestId('result-card').nth(1)).toContainText('Expected');
+    await expect(page.getByTestId('result-card').nth(1)).toContainText('0.90 ± 0.05');
+    await expect(delta(page, 1)).toHaveText('0.00');
+  });
+
+  test('a score outside the tolerance fails, with how far off it is, and still explains itself', async ({ page }) => {
+    await page.getByLabel('Expected risk score, row 3').fill('0.35');   // the model gives 0.55
+    await run(page);
+    await expect(page.getByText('1 of 3 tests failed')).toBeVisible();
+    await expect(page.getByText('The score was more than ±0.05 from the expected score.')).toBeVisible();
+    const results = await readResults(page);
+    expect(results.map((r) => r.passed)).toEqual([true, true, false]);
+    expect(results[2].delta).toBeCloseTo(results[2].score - 0.35, 6);
+    const card = page.getByTestId('result-card').nth(2);
+    await expect(card).toContainText('Fail');
+    await expect(card).toContainText('0.35 ± 0.05');
+    await expect(delta(page, 2)).toHaveText('+0.20');
+    await expect(card).toContainText('What drove this score');      // the factors are still there for a failing test
+    expect(results[2].contributions).toHaveLength(3);
+    await expect(page.getByTestId('result-card').nth(0)).toContainText('Pass');
+  });
+
+  test('a score that is too low is reported with a minus sign', async ({ page }) => {
+    await page.getByLabel('Expected risk score, row 1').fill('0.30');   // the model gives 0.05
+    await run(page);
+    await expect(page.getByText('1 of 3 tests failed')).toBeVisible();
+    await expect(delta(page, 0)).toHaveText('−0.25');
+  });
+
+  test('changing the tolerance changes which tests pass', async ({ page }) => {
+    await page.getByLabel('Expected risk score, row 3').fill('0.35');
+    await page.getByLabel('Tolerance').fill('0.3');
+    await run(page);
+    await expect(page.getByText('All 3 tests passed')).toBeVisible();
+    await expect(page.getByText('Every score is within ±0.3 of the expected score.')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Edit test data' }).click();
+    await expect(page.getByLabel('Tolerance')).toHaveValue('0.3');
+    await page.getByLabel('Tolerance').fill('0');                    // only an exact match passes
+    await run(page);
+    await expect(page.getByText('3 of 3 tests failed')).toBeVisible();
+    expect((await readResults(page)).every((r) => !r.passed)).toBe(true);
+  });
+
+  test('a single test says so', async ({ page }) => {
+    await page.getByRole('button', { name: 'Delete row 3' }).click();
+    await page.getByRole('button', { name: 'Delete row 2' }).click();
+    await run(page);
+    await expect(page.getByText('The test passed')).toBeVisible();
+  });
+
+  test('typed expected scores work for a freshly typed case', async ({ page }) => {
+    await page.getByRole('button', { name: 'Delete row 3' }).click();
+    await page.getByRole('button', { name: 'Delete row 2' }).click();
+    await fillRow(page, 1, { amount: 45000, international: true, country: 'GB', expected: 0.55 });
+    await run(page);
+    expect((await readResults(page))[0]).toMatchObject({ passed: true, expected: 0.55 });
+  });
 });
 
 test('contributions are sorted by impact and add up to the score', async ({ page }) => {
@@ -63,9 +138,9 @@ test('each card shows the test inputs, the sorted factors and the reconciliation
 
 test('all ten features: exact contributions from a model that adds its inputs up', async ({ page }) => {
   await autoMappedModelReadyForTests(page, fixture('all_features'));
-  await expect(page.getByRole('columnheader')).toHaveCount(12);   // #, ten features, delete
+  await expect(page.getByRole('columnheader')).toHaveCount(13);   // #, ten features, expected score, delete
   const header = ['channel', 'currency', 'country_code', 'txn_count_24h', 'merchant_category_code', 'account_age_days', 'amount_cents', 'is_card_present', 'is_new_device', 'is_international'];
-  await loadCsv(page, csvOf([...header].reverse(), [['true', 'true', 'false', 100000, 10, 6011, 5, 'NG', 'BTC', 'ATM']]));
+  await loadCsv(page, csvOf(['expected_score', ...[...header].reverse()], [[1, 'true', 'true', 'false', 100000, 10, 6011, 5, 'NG', 'BTC', 'ATM']]));
   await expect(page.getByText('Loaded 1 test case')).toBeVisible();
   await run(page);
   const [r] = await readResults(page);
@@ -80,16 +155,17 @@ test('all ten features: exact contributions from a model that adds its inputs up
 
 test('fifty test cases run together', async ({ page }) => {
   await sampleReadyForTests(page);
-  await loadCsv(page, csvOf(['amount_cents', 'is_international', 'country_code'], Array.from({ length: 50 }, (_, i) => [1000 * (i + 1), i % 2 === 0, i % 3 === 0 ? 'NG' : 'US'])));
+  await loadCsv(page, csvOf(['amount_cents', 'is_international', 'country_code', 'expected_score'], Array.from({ length: 50 }, (_, i) => [1000 * (i + 1), i % 2 === 0, i % 3 === 0 ? 'NG' : 'US', sampleScore(1000 * (i + 1), i % 2 === 0, i % 3 === 0 ? 'NG' : 'US').toFixed(2)])));
   await run(page);
   const results = await readResults(page);
   expect(results).toHaveLength(50);
+  expect(results.every((r) => r.passed)).toBe(true);   // expected scores are the real ones rounded to 2 decimals
   results.forEach((r, i) => expect(r.score).toBeCloseTo(sampleScore(1000 * (i + 1), i % 2 === 0, i % 3 === 0 ? 'NG' : 'US'), 4));
 });
 
 test('unusual but valid values work: zero, negative, very large amounts and non-ASCII text', async ({ page }) => {
   await sampleReadyForTests(page);
-  await loadCsv(page, csvOf(['amount_cents', 'is_international', 'country_code'], [[0, false, 'US'], [-100, true, 'ZZ'], [9007199254740991, true, 'NG'], [5, false, '日本']]));
+  await loadCsv(page, csvOf(['amount_cents', 'is_international', 'country_code', 'expected_score'], [[0, false, 'US', 0.04], [-100, true, 'ZZ', 0.3], [9007199254740991, true, 'NG', 1], [5, false, '日本', 0.04]]));
   await run(page);
   const results = await readResults(page);
   expect(results).toHaveLength(4);

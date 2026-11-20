@@ -68,11 +68,12 @@ class ModelController {
     TestRunResponse testRun(@Valid @RequestBody TestRunRequest request) {
         var result = runner.run(
                 request.mapping().stream().map(m -> new TestRunner.InputMapping(m.input(), m.feature())).toList(),
-                request.rows().stream().map(TestRowDto::values).toList());
+                request.tolerance(),
+                request.rows().stream().map(r -> new TestRunner.TestCase(r.values(), r.expected())).toList());
         return new TestRunResponse(
-                result.output(), result.elapsedMs(), result.baselineScore(),
+                result.output(), result.elapsedMs(), result.baselineScore(), result.tolerance(),
                 result.results().stream()
-                        .map(r -> new TestCaseResult(r.score(),
+                        .map(r -> new TestCaseResult(r.score(), r.expected(), r.delta(), r.passed(),
                                 r.contributions().stream().map(c -> new ContributionDto(c.feature(), c.value(), c.contribution())).toList()))
                         .toList());
     }

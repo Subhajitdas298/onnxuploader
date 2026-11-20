@@ -67,11 +67,11 @@ class ApiErrorsTest {
 
     @Test
     void problemsWithValuesAreReportedPerTestCase() throws Exception {
-        run("{" + MAPPING + ",\"rows\":[{\"values\":{\"amount_cents\":1,\"is_international\":true,\"country_code\":\"US\"}},"
-                + "{\"values\":{\"amount_cents\":\"abc\",\"is_international\":true,\"country_code\":\"US\"}}]}")
+        run("{" + MAPPING + ",\"tolerance\":0.05,\"rows\":[{\"values\":{\"amount_cents\":1,\"is_international\":true,\"country_code\":\"US\"},\"expected\":0.5},"
+                + "{\"values\":{\"amount_cents\":\"abc\",\"is_international\":true,\"country_code\":\"US\"},\"expected\":0.5}]}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail", containsString("Test case 2")));
-        run("{" + MAPPING + ",\"rows\":[{\"values\":{\"amount_cents\":99999999999999999999999,\"is_international\":true,\"country_code\":\"US\"}}]}")
+        run("{" + MAPPING + ",\"tolerance\":0.05,\"rows\":[{\"values\":{\"amount_cents\":99999999999999999999999,\"is_international\":true,\"country_code\":\"US\"},\"expected\":0.5}]}")
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail", containsString("too large")));
     }
 
@@ -116,7 +116,7 @@ class ApiErrorsTest {
                 .andExpect(jsonPath("$.usable", is(false)))
                 .andExpect(jsonPath("$.inputs[0].supported", is(false)))
                 .andExpect(jsonPath("$.inputs[0].problem", containsString("not supported")));
-        run("{" + MAPPING + ",\"rows\":[{\"values\":{}}]}").andExpect(status().isConflict());
+        run("{" + MAPPING + ",\"tolerance\":0.05,\"rows\":[{\"values\":{},\"expected\":0.5}]}").andExpect(status().isConflict());
     }
 
     @Test

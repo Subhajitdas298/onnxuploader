@@ -38,9 +38,15 @@ class TestRunnerTest {
         return 1 / (1 + Math.exp(-z));
     }
 
+
+    /** Runs rows without caring about the expected score: expected 0 with a tolerance that always passes. */
+    private TestRunner.RunResult runRows(List<TestRunner.InputMapping> mapping, List<Map<String, Object>> rows) {
+        return runner.run(mapping, 1e9, rows.stream().map(r -> new TestRunner.TestCase(r, 0.0)).toList());
+    }
+
     @Test
     void scoresMatchTheModelFormula() {
-        var result = runner.run(MAPPING, List.of(
+        var result = runRows(MAPPING, List.of(
                 Map.of("amount_cents", 1250, "is_international", false, "country_code", "US"),
                 Map.of("amount_cents", 89900, "is_international", true, "country_code", "NG"),
                 Map.of("amount_cents", 45000, "is_international", true, "country_code", "GB")));
@@ -54,7 +60,7 @@ class TestRunnerTest {
 
     @Test
     void contributionsAreSortedAndReconcileWithTheScore() {
-        var result = runner.run(MAPPING, List.of(Map.of("amount_cents", 45000, "is_international", true, "country_code", "GB")));
+        var result = runRows(MAPPING, List.of(Map.of("amount_cents", 45000, "is_international", true, "country_code", "GB")));
         var r = result.results().get(0);
 
         assertThat(r.contributions()).hasSize(3);
@@ -76,7 +82,7 @@ class TestRunnerTest {
                 new TestRunner.InputMapping("amount_cents", "is_international"),
                 new TestRunner.InputMapping("is_international", "amount_cents"),
                 new TestRunner.InputMapping("country", "country_code"));
-        assertThatThrownBy(() -> runner.run(bad, List.of(Map.of())))
+        assertThatThrownBy(() -> runRows(bad, List.of(Map.of())))
                 .isInstanceOf(ApiException.class).hasMessageContaining("needs");
     }
 
@@ -87,28 +93,58 @@ class TestRunnerTest {
                 new TestRunner.InputMapping("is_international", "is_international"),
                 new TestRunner.InputMapping("country", "currency"),
                 new TestRunner.InputMapping("country", "country_code"));
-        assertThatThrownBy(() -> runner.run(bad, List.of(Map.of()))).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> runRows(bad, List.of(Map.of()))).isInstanceOf(ApiException.class);
     }
 
     @Test
     void rejectsMissingOrWrongValues() {
-        assertThatThrownBy(() -> runner.run(MAPPING, List.of(Map.of("amount_cents", 1, "is_international", true))))
+        assertThatThrownBy(() -> runRows(MAPPING, List.of(Map.of("amount_cents", 1, "is_international", true))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("country_code");
-        assertThatThrownBy(() -> runner.run(MAPPING, List.of(Map.of("amount_cents", 1.5, "is_international", true, "country_code", "US"))))
+        assertThatThrownBy(() -> runRows(MAPPING, List.of(Map.of("amount_cents", 1.5, "is_international", true, "country_code", "US"))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("whole number");
     }
 
     @Test
     void needsAtLeastOneTestCase() {
-        assertThatThrownBy(() -> runner.run(MAPPING, List.of()))
+        assertThatThrownBy(() -> runRows(MAPPING, List.of()))
                 .isInstanceOf(ApiException.class).hasMessageContaining("at least one");
     }
 
     @Test
     void pickingUpANewUploadReloadsTheModel() throws IOException {
-        runner.run(MAPPING, List.of(Map.of("amount_cents", 1, "is_international", true, "country_code", "US")));
+        runRows(MAPPING, List.of(Map.of("amount_cents", 1, "is_international", true, "country_code", "US")));
         store.put("garbage".getBytes());
-        assertThatThrownBy(() -> runner.run(MAPPING, List.of(Map.of("amount_cents", 1, "is_international", true, "country_code", "US"))))
+        assertThatThrownBy(() -> runRows(MAPPING, List.of(Map.of("amount_cents", 1, "is_international", true, "country_code", "US"))))
                 .isInstanceOf(ApiException.class).hasMessageContaining("cannot be run");
+    }
+
+    @Test
+    void passesAndFailsAgainstTheExpectedScoreWithinTheTolerance() {
+        var row = Map.<String, Object>of("amount_cents", 89900, "is_international", true, "country_code", "NG");
+        var result = runner.run(MAPPING, 0.05, List.of(new TestRunner.TestCase(row, 0.90), new TestRunner.TestCase(row, 0.50)));
+        assertThat(result.tolerance()).isEqualTo(0.05);
+        assertThat(result.results().get(0).passed()).isTrue();
+        assertThat(result.results().get(0).expected()).isEqualTo(0.90);
+        assertThat(result.results().get(0).delta()).isCloseTo(result.results().get(0).score() - 0.90, within(1e-12));
+        assertThat(result.results().get(1).passed()).isFalse();
+    }
+
+    @Test
+    void theBoundaryOfTheToleranceIsInclusive() {
+        var row = Map.<String, Object>of("amount_cents", 89900, "is_international", true, "country_code", "NG");
+        double score = runner.run(MAPPING, 1.0, List.of(new TestRunner.TestCase(row, 0.0))).results().get(0).score();
+        assertThat(runner.run(MAPPING, score, List.of(new TestRunner.TestCase(row, 0.0))).results().get(0).passed()).isTrue();
+        assertThat(runner.run(MAPPING, score - 1e-6, List.of(new TestRunner.TestCase(row, 0.0))).results().get(0).passed()).isFalse();
+    }
+
+    @Test
+    void anInvalidToleranceOrExpectedScoreIsRefused() {
+        var row = Map.<String, Object>of("amount_cents", 1, "is_international", true, "country_code", "US");
+        assertThatThrownBy(() -> runner.run(MAPPING, -0.01, List.of(new TestRunner.TestCase(row, 0.5))))
+                .isInstanceOf(ApiException.class).hasMessageContaining("tolerance");
+        assertThatThrownBy(() -> runner.run(MAPPING, Double.NaN, List.of(new TestRunner.TestCase(row, 0.5))))
+                .isInstanceOf(ApiException.class).hasMessageContaining("tolerance");
+        assertThatThrownBy(() -> runner.run(MAPPING, 0.05, List.of(new TestRunner.TestCase(row, 0.5), new TestRunner.TestCase(row, Double.NaN))))
+                .isInstanceOf(ApiException.class).hasMessageContaining("Test case 2").hasMessageContaining("expected score");
     }
 }

@@ -1,8 +1,9 @@
 # Fraud Model Runner
 
 A demo for scoring financial transactions with an ONNX fraud model. Upload a model, map its inputs to a fixed set of
-10 transaction features, add test cases (by hand or from a CSV), and see the risk score for each case together with
-the features that drove it, sorted by impact. Nothing else.
+10 transaction features, add test cases with the score you expect (by hand or from a CSV), and see for each case the
+model's risk score, whether it matches the expected score within a tolerance, and the features that drove it, sorted by
+impact. Nothing else.
 
 | 1. Upload | 2. Map features | 3. Test data | 4. Risk scores |
 |---|---|---|---|
@@ -33,6 +34,9 @@ Browser (React, MUI, Redux Toolkit)                       Azure
 - **Contributions** are exact Shapley values: each feature's average effect on the score compared with a baseline
   (typical) transaction. The service re-runs the model for every subset of features (2ⁿ runs per test case, at most
   1,024 with 10 features). Baseline values live in `FeatureCatalog.java`.
+- **Expected score and tolerance.** Every test case has an expected risk score, and one tolerance (default 0.05) applies
+  to the run. A test passes when the model's score is within the tolerance of the expected score, both ends included.
+  Failing tests still show their contributions.
 - **At least one test case** is required and a run takes at most 50.
 
 ## Sample model and test data
@@ -41,21 +45,22 @@ Browser (React, MUI, Redux Toolkit)                       Azure
   `amount_cents` (int64), `is_international` (bool) and `country` (string), returning `risk_score`.
   The input is called `country` on purpose: the other two inputs match automatically and this one shows the manual
   drag and drop to `country_code`.
-- [`samples/test-data.csv`](samples/test-data.csv): three test cases for it. Use **Load CSV** on the test data screen,
-  or copy the rows into the grid.
+- [`samples/test-data.csv`](samples/test-data.csv): three test cases for it, with their expected scores. Use **Load CSV**
+  on the test data screen, or copy the rows into the grid.
 
 ```csv
-amount_cents,is_international,country_code
-1250,false,US
-89900,true,NG
-45000,true,GB
+amount_cents,is_international,country_code,expected_score
+1250,false,US,0.05
+89900,true,NG,0.90
+45000,true,GB,0.55
 ```
 
-Expected scores are about 0.05, 0.90 and 0.55. `samples/generate_model.py` regenerates both files and checks the model
+The expected scores are the model's own scores rounded to two decimals, so all three pass with the default tolerance. `samples/generate_model.py` regenerates both files and checks the model
 against a reference formula (`pip install onnx onnxruntime numpy`).
 
-CSV files need a header row with one column per mapped feature name. Column order does not matter. Booleans are
-`true/false` (also `1/0`, `yes/no`), integers are whole numbers.
+CSV files need a header row with one column per mapped feature name plus `expected_score` (or `expected`). Column order
+does not matter. Booleans are `true/false` (also `1/0`, `yes/no`), integers are whole numbers, the expected score is a
+number.
 
 ## Run locally
 
@@ -81,9 +86,9 @@ cd frontend && npm ci && npm run dev
 
 | Suite | Run it | What it covers |
 |---|---|---|
-| Backend, 57 tests | `cd backend && ./gradlew test` | ONNX header reader, analyzer, inference, exact Shapley values, value validation (int32 range, huge numbers, text length), 10-feature model with 51,200 runs, concurrent runs while the model is replaced, HTTP errors and CORS, SAS link permissions and expiry. Set `AZURITE_CONNECTION_STRING` to also run the real blob tests (upload through the SAS link, overwrite, tampered links). |
-| Frontend unit, 14 tests | `cd frontend && npm test` | CSV parsing and validation, automatic mapping, mapping state. |
-| Browser, 63 tests | `scripts/e2e.sh` | The real UI against the real API and a blob emulator (Azurite): uploads, rejected files, drag and drop and keyboard/tap placement, unsupported models, grid validation, CSV import, scores checked against a reference formula, contributions, failures of the service or of storage, accessibility scan (axe, light and dark theme) and phone layout. |
+| Backend, 67 tests | `cd backend && ./gradlew test` | ONNX header reader, analyzer, inference, exact Shapley values, value validation (int32 range, huge numbers, text length), 10-feature model with 51,200 runs, concurrent runs while the model is replaced, HTTP errors and CORS, SAS link permissions and expiry. Set `AZURITE_CONNECTION_STRING` to also run the real blob tests (upload through the SAS link, overwrite, tampered links). |
+| Frontend unit, 16 tests | `cd frontend && npm test` | CSV parsing and validation, automatic mapping, mapping state. |
+| Browser, 74 tests | `scripts/e2e.sh` | The real UI against the real API and a blob emulator (Azurite): uploads, rejected files, drag and drop and keyboard/tap placement, unsupported models, grid validation, CSV import, scores checked against a reference formula, contributions, failures of the service or of storage, accessibility scan (axe, light and dark theme) and phone layout. |
 | Browser, built UI on another origin | `E2E_MODE=prod scripts/e2e.sh` | The same tests against the production build served from a different origin than the API, so CORS for the API and for direct uploads to blob storage is exercised like in Azure. |
 
 `scripts/e2e.sh` starts Azurite, the API and the UI itself (Java 25 and Node 22 needed; set `PW_CHROMIUM_PATH` to use an
@@ -149,4 +154,4 @@ docs/       screenshots
 | `GET /api/model` | whether a model is stored, its size and last change |
 | `POST /api/upload-link` | a 15 minute write-only SAS URL for the model blob |
 | `GET /api/model/analysis` | validity, inputs, outputs and metadata of the stored model |
-| `POST /api/model/test-run` | scores and sorted feature contributions for the given test cases |
+| `POST /api/model/test-run` | for each test case (values and expected score) and a tolerance: the score, pass or fail, and sorted feature contributions |
