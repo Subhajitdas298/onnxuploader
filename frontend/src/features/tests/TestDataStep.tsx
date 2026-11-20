@@ -1,4 +1,5 @@
 import Add from '@mui/icons-material/Add';
+import ScienceOutlined from '@mui/icons-material/ScienceOutlined';
 import ArrowBack from '@mui/icons-material/ArrowBack';
 import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
 import ErrorOutlined from '@mui/icons-material/ErrorOutlined';
@@ -30,6 +31,7 @@ import TypeChip from '../../components/TypeChip';
 import { monoFont } from '../../theme';
 import type { CellValue, FeatureKind, TestRunRequest } from '../../types';
 import { isNumber, isWholeNumber, parseTestCsv } from './csv';
+import { DEMO_CSV, DEMO_CSV_NAME } from './demoData';
 import { DEFAULT_TOLERANCE, addRow, csvFailed, csvLoaded, deleteRow, setCell, setExpected, setTolerance, triedRun, type TestRow } from './testsSlice';
 
 interface Column {
@@ -75,11 +77,12 @@ export default function TestDataStep() {
   );
   const toleranceBad = toleranceInvalid(tolerance);
 
-  const loadCsv = async (file: File) => {
-    const result = parseTestCsv(await file.text(), columns);
-    if (result.errors.length) dispatch(csvFailed({ name: file.name, errors: result.errors }));
-    else dispatch(csvLoaded({ name: file.name, rows: result.rows }));
+  const applyCsv = (text: string, name: string) => {
+    const result = parseTestCsv(text, columns);
+    if (result.errors.length) dispatch(csvFailed({ name, errors: result.errors }));
+    else dispatch(csvLoaded({ name, rows: result.rows }));
   };
+  const loadCsv = async (file: File) => applyCsv(await file.text(), file.name);
 
   const submit = async () => {
     if (rows.length === 0 || invalidCount > 0 || toleranceBad) {
@@ -114,7 +117,14 @@ export default function TestDataStep() {
 
   return (
     <>
-      <StepHeader title="Test data">
+      <StepHeader
+        title="Test data"
+        below={
+          <Button size="small" variant="outlined" startIcon={<ScienceOutlined />} onClick={() => applyCsv(DEMO_CSV, DEMO_CSV_NAME)}>
+            Load demo CSV
+          </Button>
+        }
+      >
         Enter feature values and the risk score you expect for each test case, or load them from a CSV file. A test passes when the model's score is within the tolerance of the expected score. At least one test case is required.
       </StepHeader>
       <Stack spacing={2}>

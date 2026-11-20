@@ -60,6 +60,50 @@ test('text cells must not be blank', async ({ page }) => {
   await expect(status(page)).toHaveText('1 cell needs a value');
 });
 
+test.describe('demo CSV button', () => {
+  const demo = (page: Page) => page.getByRole('button', { name: 'Load demo CSV' });
+
+  test('sits directly under the paragraph and above the grid', async ({ page }) => {
+    const paragraph = await page.getByText(/Enter feature values and the risk score you expect/).boundingBox();
+    const button = await demo(page).boundingBox();
+    const toolbar = await page.getByRole('button', { name: 'Add row' }).boundingBox();
+    expect(paragraph && button && toolbar).toBeTruthy();
+    expect(button!.y).toBeGreaterThanOrEqual(paragraph!.y + paragraph!.height);   // below the paragraph
+    expect(button!.y - (paragraph!.y + paragraph!.height)).toBeLessThan(40);      // right under it
+    expect(button!.y + button!.height).toBeLessThanOrEqual(toolbar!.y);           // and above the grid toolbar
+  });
+
+  test('loads the three demo cases with their expected scores, which pass', async ({ page }) => {
+    await demo(page).click();
+    await expect(page.getByText('Loaded 3 test cases from demo-test-data.csv')).toBeVisible();
+    await expect.poll(() => rowCount(page)).toBe(3);
+    await expect(amount(page, 2)).toHaveValue('89900');
+    await expect(international(page, 2)).toBeChecked();
+    await expect(country(page, 2)).toHaveValue('NG');
+    await expect(expected(page, 3)).toHaveValue('0.55');
+    await page.getByRole('button', { name: 'Run tests' }).click();
+    await expect(page.getByText('All 3 tests passed')).toBeVisible();
+  });
+
+  test('replaces what is in the grid and can be used again', async ({ page }) => {
+    await fillRow(page, 1, { amount: 7, country: 'DE', expected: 0.4 });
+    await demo(page).click();
+    await expect.poll(() => rowCount(page)).toBe(3);
+    await expect(amount(page, 1)).toHaveValue('1250');
+    await page.getByRole('button', { name: 'Delete row 1' }).click();
+    await demo(page).click();
+    await expect.poll(() => rowCount(page)).toBe(3);
+  });
+
+  test('says what is missing when the model does not match the demo data', async ({ page }) => {
+    await clearModel();
+    await autoMappedModelReadyForTests(page, fixture('all_features'));
+    await demo(page).click();
+    await expect(page.getByText('Could not load demo-test-data.csv')).toBeVisible();
+    await expect(page.getByText('Missing column “channel”.')).toBeVisible();
+  });
+});
+
 test('the expected score must be a number', async ({ page }) => {
   for (const [value, ok] of [['abc', false], ['1,5', false], ['0x1', false], ['--1', false], ['0.9', true], ['.5', true], ['1', true], ['-0.2', true], ['1e-2', true], ['100', true]] as const) {
     await expected(page, 1).fill(value);

@@ -45,8 +45,9 @@ Browser (React, MUI, Redux Toolkit)                       Azure
   `amount_cents` (int64), `is_international` (bool) and `country` (string), returning `risk_score`.
   The input is called `country` on purpose: the other two inputs match automatically and this one shows the manual
   drag and drop to `country_code`.
-- [`samples/test-data.csv`](samples/test-data.csv): three test cases for it, with their expected scores. Use **Load CSV**
-  on the test data screen, or copy the rows into the grid.
+- [`samples/test-data.csv`](samples/test-data.csv): three test cases for it, with their expected scores. Click **Load demo
+  CSV** (right under the description on the test data screen) to load it in one step, or use **Load CSV** to pick the file,
+  or copy the rows into the grid. The button reads this same file, so there is a single copy of the demo data.
 
 ```csv
 amount_cents,is_international,country_code,expected_score
@@ -87,8 +88,8 @@ cd frontend && npm ci && npm run dev
 | Suite | Run it | What it covers |
 |---|---|---|
 | Backend, 67 tests | `cd backend && ./gradlew test` | ONNX header reader, analyzer, inference, exact Shapley values, value validation (int32 range, huge numbers, text length), 10-feature model with 51,200 runs, concurrent runs while the model is replaced, HTTP errors and CORS, SAS link permissions and expiry. Set `AZURITE_CONNECTION_STRING` to also run the real blob tests (upload through the SAS link, overwrite, tampered links). |
-| Frontend unit, 16 tests | `cd frontend && npm test` | CSV parsing and validation, automatic mapping, mapping state. |
-| Browser, 74 tests | `scripts/e2e.sh` | The real UI against the real API and a blob emulator (Azurite): uploads, rejected files, drag and drop and keyboard/tap placement, unsupported models, grid validation, CSV import, scores checked against a reference formula, contributions, failures of the service or of storage, accessibility scan (axe, light and dark theme) and phone layout. |
+| Frontend unit, 18 tests | `cd frontend && npm test` | CSV parsing and validation, automatic mapping, mapping state. |
+| Browser, 78 tests | `scripts/e2e.sh` | The real UI against the real API and a blob emulator (Azurite): uploads, rejected files, drag and drop and keyboard/tap placement, unsupported models, grid validation, CSV import, scores checked against a reference formula, contributions, failures of the service or of storage, accessibility scan (axe, light and dark theme) and phone layout. |
 | Browser, built UI on another origin | `E2E_MODE=prod scripts/e2e.sh` | The same tests against the production build served from a different origin than the API, so CORS for the API and for direct uploads to blob storage is exercised like in Azure. |
 
 `scripts/e2e.sh` starts Azurite, the API and the UI itself (Java 25 and Node 22 needed; set `PW_CHROMIUM_PATH` to use an
