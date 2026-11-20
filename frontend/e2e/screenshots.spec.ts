@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { clearModel, dragFeature, expect, loadCsv, SAMPLE_CSV, SAMPLE_MODEL, test, uploadModel } from './support';
+import { clearModel, dragFeature, expect, SAMPLE_MODEL, test, uploadModel } from './support';
 
 // Regenerates docs/screenshots from the real app:  E2E_SCREENSHOTS=1 scripts/e2e.sh e2e/screenshots.spec.ts
 test.skip(!process.env.E2E_SCREENSHOTS, 'only runs when E2E_SCREENSHOTS is set');
@@ -21,7 +21,7 @@ test('capture every screen', async ({ page }) => {
   await expect(page.getByText('All inputs mapped')).toBeVisible();
 
   await page.getByRole('button', { name: 'Continue to test data' }).click();
-  await loadCsv(page, SAMPLE_CSV);
+  await page.getByRole('button', { name: 'Load demo CSV' }).click();
   await expect(page.getByText('Loaded 3 test cases')).toBeVisible();
   await page.screenshot({ path: out('3-test-data'), fullPage: true });
 
